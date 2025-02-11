@@ -1,42 +1,25 @@
 import io
-import json
+import os
+import sys
 import subprocess
 import traceback
 from datetime import datetime
 import pytz
-import happybase
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-import pymongo
-from hdfs import InsecureClient
+import logging
 
+sys.path.append(os.path.abspath("HBase/Helper"))
+from Helper.config import Config, init_connect
 from Model.DataModel import Locality
 
-
-def init_connect(task_file):
-    try:
-        with open(task_file, 'r') as f:
-            task_config = json.load(f)
-        hbase = task_config["hbase"]
-        hbase_uri = hbase["uri"]
-        hdfs_info = task_config["hdfs"]
-        mongo = task_config["mongo"]
-        mongo_uri = mongo["identity_uri"]
-        client = InsecureClient(f'http://{hdfs_info["name_node_host"]}:{hdfs_info["port"]}', user=hdfs_info["username"], timeout=600000)
-        hbase_connection = happybase.Connection(hbase_uri)
-        mongo_client = pymongo.MongoClient(mongo_uri)
-        tables = hbase_connection.tables()  # Liệt kê các bảng
-        print(f"Kết nối thành công! {tables}")
-        return hbase_connection, client, mongo_client
-    except Exception as e:
-        print(f"Lỗi kết nối: {e}")
-        traceback.print_exc()
-        raise
+logger = logging.getLogger("Lakehouse")
+config = Config()
 
 
-async def cut_off_data(task_file, table_name):
-    (hbase_connection, hdfs_client, mongo_client) = init_connect(task_file)
+async def cut_off_data(table_name):
+    (hbase_connection, hdfs_client, mongo_client) = init_connect(config)
     timezone = pytz.timezone('Asia/Bangkok')
     date_report = datetime.now(timezone)
     try:

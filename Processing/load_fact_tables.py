@@ -1,56 +1,41 @@
 import asyncio
-import json
 import re
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
-
-import happybase
-import pymongo
+import logging
+from Helper.config import Config, init_connect
 
 CHUNK_SIZE = 1000
 MAX_WORKERS = 4
 
+logger = logging.getLogger("Lakehouse")
 
-def _init_connect(task_config, node_name, collection_name, table_name):
-    mongo = task_config["mongo"]
-    mongo_uri = mongo["identity_uri"]
-    mongo_client = pymongo.MongoClient(mongo_uri)
-    mongodb = mongo_client[node_name]
-    collection = mongodb[collection_name]
-    if table_name is None:
-        return collection, None, None, mongo_client
-    hbase = task_config["hbase"]
-    hbase_uri = hbase["uri"]
-    hbase_connection = happybase.Connection(hbase_uri)
-    table = hbase_connection.table(table_name)
-    return collection, table, hbase_connection, mongo_client
+config = Config()
 
 
-async def process_fetch_tables(task_file):
-    with open(task_file, 'r') as f:
-        task_config = json.load(f)
+async def process_fetch_tables():
     date_now = datetime.now()
     temp_time = f"{date_now.year}-{date_now.month}-{date_now.day - 1}T17:00:00.000Z"
     end_date = datetime.strptime(temp_time, "%Y-%m-%dT%H:%M:%S.%fZ")
-    start_date = end_date - timedelta(days=365)
-    await load_data_identity(task_config, start_date, end_date)
-    await load_data_csc(task_config, start_date, end_date)
+    start_date = end_date - timedelta(days=1)
+    await load_data_identity(start_date, end_date)
+    await load_data_csc(start_date, end_date)
 
 
-async def load_data_identity(task_config, start_date, end_date):
+async def load_data_identity(start_date, end_date):
     try:
         node_name = "signservice_identity"
-        await load_user(task_config, node_name, start_date, end_date)
-        await load_cert_order(task_config, node_name, start_date, end_date)
-        await load_personal_turn_order(task_config, node_name, start_date, end_date)
+        await load_user(node_name, start_date, end_date)
+        await load_cert_order(node_name, start_date, end_date)
+        await load_personal_turn_order(node_name, start_date, end_date)
     except Exception as e:
-        print(f"Bỏ qua bảng do lỗi: {e}")
+        logger.error(f"Bỏ qua bảng do lỗi: {e}")
         traceback.print_exc()
 
 
-async def load_cert_order(task_config, node_name, start_date, end_date):
-    collection, table, hbase_connection, mongo_client = _init_connect(task_config, node_name, "CertOrder", "CertOrder")
+async def load_cert_order(node_name, start_date, end_date):
+    collection, table, hbase_connection, mongo_client = init_connect(config, node_name, "CertOrder", ["cert_order"])
     try:
         documents = collection.find({'$and': [
             {'$or': [{'CreatedDate': {'$gte': start_date}}, {'UpdatedDate': {'gte': start_date}}]},
@@ -59,16 +44,16 @@ async def load_cert_order(task_config, node_name, start_date, end_date):
         # Xử lý song song bất đồng bộ
         await _process_chunks(table, "CertOrder", documents)
     except Exception as e:
-        print(f"Lỗi khi xử lý bảng CertOrder: {e} ")
+        logger.error(f"Lỗi khi xử lý bảng CertOrder: {e} ")
         traceback.print_exc()
     finally:
         hbase_connection.close()
         mongo_client.close()
-    print("Chuyển dữ liệu CertOrder thành công từ MongoDB sang HBase.")
+    logger.info("Chuyển dữ liệu CertOrder thành công từ MongoDB sang HBase.")
 
 
 async def _transfer_cert_order(chunk, table):
-    batch = table.batch()
+    batch = table[0].batch()
     try:
         for document in chunk:
             FullName = document.get("FullName", "")
@@ -114,7 +99,7 @@ async def _transfer_cert_order(chunk, table):
                 AcceptanceUrl = Acceptance[-1].get('UrlSigned', '') if document.get(
                     'AcceptanceDocuments') else ''
 
-            old_item = table.row(row_key)
+            old_item = table[0].row(row_key)
             if old_item is None or old_item == {}:
                 IdentityId = str(document.get("IdentityId", ""))
                 Uid = document.get("Uid", "")
@@ -218,34 +203,34 @@ async def _transfer_cert_order(chunk, table):
                 batch.put(row_key, data)
             else:
                 if _column_value_exists(table, row_key, "ìnfo", "status", Status):
-                    table.put(row_key, {'info:status': str(Status).encode('utf-8')})
+                    table[0].put(row_key, {'info:status': str(Status).encode('utf-8')})
                 if _column_value_exists(table, row_key, "ìnfo", "status_desc", StatusDesc):
-                    table.put(row_key, {'info:status_desc': str(StatusDesc).encode('utf-8')})
+                    table[0].put(row_key, {'info:status_desc': str(StatusDesc).encode('utf-8')})
                 if _column_value_exists(table, row_key, "ìnfo", "updated_date", UpdatedDate):
-                    table.put(row_key, {'info:updated_date': str(UpdatedDate).encode('utf-8')})
+                    table[0].put(row_key, {'info:updated_date': str(UpdatedDate).encode('utf-8')})
                 if _column_value_exists(table, row_key, "ìnfo", "request_cert_id", RequestCertId):
-                    table.put(row_key, {'info:request_cert_id': str(RequestCertId).encode('utf-8')})
+                    table[0].put(row_key, {'info:request_cert_id': str(RequestCertId).encode('utf-8')})
                 if _column_value_exists(table, row_key, "ìnfo", "credential_id", CredentialId):
-                    table.put(row_key, {'info:credential_id': str(CredentialId).encode('utf-8')})
+                    table[0].put(row_key, {'info:credential_id': str(CredentialId).encode('utf-8')})
                 if _column_value_exists(table, row_key, "ìnfo", "contract_url", ContractUrl):
-                    table.put(row_key, {'info:contract_url': str(ContractUrl).encode('utf-8')})
+                    table[0].put(row_key, {'info:contract_url': str(ContractUrl).encode('utf-8')})
                 if _column_value_exists(table, row_key, "ìnfo", "acceptance_url", AcceptanceUrl):
-                    table.put(row_key, {'info:acceptance_url': str(AcceptanceUrl).encode('utf-8')})
+                    table[0].put(row_key, {'info:acceptance_url': str(AcceptanceUrl).encode('utf-8')})
                 if _column_value_exists(table, row_key, "ìnfo", "log_content", LogContent):
-                    table.put(row_key, {'info:log_content': str(LogContent).encode('utf-8')})
+                    table[0].put(row_key, {'info:log_content': str(LogContent).encode('utf-8')})
                 if _column_value_exists(table, row_key, "ìnfo", "log_created_date", LogCreatedDate):
-                    table.put(row_key, {'info:log_created_date': str(LogCreatedDate).encode('utf-8')})
+                    table[0].put(row_key, {'info:log_created_date': str(LogCreatedDate).encode('utf-8')})
                 if _column_value_exists(table, row_key, "ìnfo", "serial", Serial):
-                    table.put(row_key, {'info:serial': str(Serial).encode('utf-8')})
+                    table[0].put(row_key, {'info:serial': str(Serial).encode('utf-8')})
             batch.send()
-        print(f"Batch với {len(chunk)} bản ghi đã được xử lý.")
+        logger.info(f"Batch với {len(chunk)} bản ghi đã được xử lý.")
     except Exception as e:
-        print(f"Lỗi trong quá trình xử lý batch: {e}")
+        logger.error(f"Lỗi trong quá trình xử lý batch: {e}")
         traceback.print_exc()
 
 
-async def load_user(task_config, node_name, start_date, end_date):
-    collection_register, table, hbase_connection, mongo_client = _init_connect(task_config, node_name, "Register", "User")
+async def load_user(node_name, start_date, end_date):
+    collection_register, table, hbase_connection, mongo_client = init_connect(config, node_name, "Register", ["user_info"])
     try:
         documents_register = collection_register.find({'$and': [
             {'$or': [{'createdDate': {'$gte': start_date}}, {'modifiedDate': {'gte': start_date}}]},
@@ -254,14 +239,14 @@ async def load_user(task_config, node_name, start_date, end_date):
         # Xử lý song song bất đồng bộ
         await _process_chunks(table, "Register", documents_register)
     except Exception as e:
-        print(f"Lỗi khi xử lý bảng Register: {e}")
+        logger.error(f"Lỗi khi xử lý bảng Register: {e}")
         traceback.print_exc()
     finally:
         hbase_connection.close()
         mongo_client.close()
-    print("Chuyển dữ liệu Register thành công từ MongoDB sang HBase.")
+    logger.info("Chuyển dữ liệu Register thành công từ MongoDB sang HBase.")
 
-    collection_user, table, hbase_connection, mongo_client = _init_connect(task_config, node_name, "User", "User")
+    collection_user, table, hbase_connection, mongo_client = init_connect(config, node_name, "User", ["user_info"])
     try:
         documents_user = collection_user.find({'$and': [
             {'$or': [{'createDate': {'$gte': start_date}}, {'modifiedDate': {'gte': start_date}}]},
@@ -270,16 +255,16 @@ async def load_user(task_config, node_name, start_date, end_date):
         # Xử lý song song bất đồng bộ
         await _process_chunks(table, "User", documents_user)
     except Exception as e:
-        print(f"Lỗi khi xử lý bảng User: {e}")
+        logger.error(f"Lỗi khi xử lý bảng User: {e}")
         traceback.print_exc()
     finally:
         hbase_connection.close()
         mongo_client.close()
-    print("Chuyển dữ liệu User thành công từ MongoDB sang HBase.")
+    logger.info("Chuyển dữ liệu User thành công từ MongoDB sang HBase.")
 
 
-async def load_personal_turn_order(task_config, node_name, start_date, end_date):
-    collection, table, hbase_connection, mongo_client = _init_connect(task_config, node_name, "PersonalSignTurnOrder", "PersonalSignTurnOrder")
+async def load_personal_turn_order(node_name, start_date, end_date):
+    collection, table, hbase_connection, mongo_client = init_connect(config, node_name, "PersonalSignTurnOrder", ["personal_sign_turn_order"])
     try:
         documents = collection.find({'$and': [
             {'$or': [{'CreatedDate': {'$gte': start_date}}, {'UpdatedDate': {'gte': start_date}}]},
@@ -288,27 +273,27 @@ async def load_personal_turn_order(task_config, node_name, start_date, end_date)
         # Xử lý song song bất đồng bộ
         await _process_chunks(table, "PersonalSignTurnOrder", documents)
     except Exception as e:
-        print(f"Lỗi khi xử lý bảng PersonalSignTurnOrder: {e}")
+        logger.error(f"Lỗi khi xử lý bảng PersonalSignTurnOrder: {e}")
         traceback.print_exc()
     finally:
         hbase_connection.close()
         mongo_client.close()
-    print("Chuyển dữ liệu PersonalSignTurnOrder thành công từ MongoDB sang HBase.")
+    logger.info("Chuyển dữ liệu PersonalSignTurnOrder thành công từ MongoDB sang HBase.")
 
 
-async def load_data_csc(task_config, start_date, end_date):
+async def load_data_csc(start_date, end_date):
     try:
         node_name = "signservice_credential"
-        await load_credential(task_config, node_name, start_date, end_date)
-        await load_cert(task_config, node_name, start_date, end_date)
-        await load_signature_transaction(task_config, node_name, start_date, end_date)
+        await load_credential(node_name, start_date, end_date)
+        await load_cert(node_name, start_date, end_date)
+        await load_signature_transaction(node_name, start_date, end_date)
     except Exception as e:
-        print(f"Bỏ qua bảng do lỗi: {e}")
+        logger.error(f"Bỏ qua bảng do lỗi: {e}")
         traceback.print_exc()
 
 
-async def load_credential(task_config, node_name, start_date, end_date):
-    collection, table, hbase_connection, mongo_client = _init_connect(task_config, node_name, "Credential", "Credential")
+async def load_credential(node_name, start_date, end_date):
+    collection, table, hbase_connection, mongo_client = init_connect(config, node_name, "Credential", ["credential", "credential_status_log"])
     try:
         documents = collection.find({'$and': [
             {'$or': [{'createdDate': {'$gte': start_date}}, {'modifiedDate': {'gte': start_date}}]},
@@ -318,16 +303,16 @@ async def load_credential(task_config, node_name, start_date, end_date):
         await _process_chunks(table, "Credential", documents)
 
     except Exception as e:
-        print(f"Lỗi khi xử lý bảng Credential: {e} ")
+        logger.error(f"Lỗi khi xử lý bảng Credential: {e} ")
         traceback.print_exc()
     finally:
         hbase_connection.close()
         mongo_client.close()
-    print("Chuyển dữ liệu Credential thành công từ MongoDB sang HBase.")
+    logger.info("Chuyển dữ liệu Credential thành công từ MongoDB sang HBase.")
 
 
-async def load_cert(task_config, node_name, start_date, end_date):
-    collection_request_cert, table, hbase_connection, mongo_client = _init_connect(task_config, node_name, "RequestCert", "Cert")
+async def load_cert(node_name, start_date, end_date):
+    collection_request_cert, table, hbase_connection, mongo_client = init_connect(config, node_name, "RequestCert", ["cert"])
     try:
         documents_request_cert = collection_request_cert.find({'$and': [
             {'$or': [{'createdDate': {'$gte': start_date}}, {'updatedTime': {'gte': start_date}}]},
@@ -336,15 +321,15 @@ async def load_cert(task_config, node_name, start_date, end_date):
         # Xử lý song song bất đồng bộ
         await _process_chunks(table, "RequestCert", documents_request_cert)
     except Exception as e:
-        print(f"Lỗi khi xử lý bảng RequestCert: {e}")
+        logger.error(f"Lỗi khi xử lý bảng RequestCert: {e}")
         traceback.print_exc()
     finally:
         hbase_connection.close()
         mongo_client.close()
-    print("Chuyển dữ liệu RequestCert thành công từ MongoDB sang HBase.")
+    logger.info("Chuyển dữ liệu RequestCert thành công từ MongoDB sang HBase.")
 
     try:
-        collection_cert, table, hbase_connection, mongo_client = _init_connect(task_config, node_name, "Cert", "Cert")
+        collection_cert, table, hbase_connection, mongo_client = init_connect(config, node_name, "Cert", ["cert"])
         documents_cert = collection_cert.find({'$and': [
             {'createDate': {'$gte': start_date}},
             {'createDate': {'$lt': end_date}}]},
@@ -352,17 +337,17 @@ async def load_cert(task_config, node_name, start_date, end_date):
         # Xử lý song song bất đồng bộ
         await _process_chunks(table, "Cert", documents_cert)
     except Exception as e:
-        print(f"Lỗi khi xử lý bảng Cert: {e}")
+        logger.error(f"Lỗi khi xử lý bảng Cert: {e}")
         traceback.print_exc()
     finally:
         hbase_connection.close()
         mongo_client.close()
-    print("Chuyển dữ liệu Cert thành công từ MongoDB sang HBase.")
+    logger.info("Chuyển dữ liệu Cert thành công từ MongoDB sang HBase.")
 
 
-async def _get_cut_off_name(task_config, node_name, table_name, start_date, end_date):
+async def _get_cut_off_name(node_name, table_name, start_date, end_date):
     all_data = [table_name]
-    collection, table, hbase_connection, mongo_client = _init_connect(task_config, node_name, "CutOff", None)
+    collection, table, hbase_connection, mongo_client = init_connect(config, node_name, "CutOff", None)
     try:
         if start_date is None:
             if end_date is None:
@@ -384,21 +369,21 @@ async def _get_cut_off_name(task_config, node_name, table_name, start_date, end_
         for document in documents:
             collectionName = str(document.get("collectionName", ""))
             all_data.append(collectionName)
-        print(f"Get table name cut off table {table_name} from MongoDB.")
+        logger.info(f"Get table name cut off table {table_name} from MongoDB.")
     except Exception as e:
-        print(f"Lỗi khi xử lý bảng SignatureTransaction: {e}")
+        logger.error(f"Lỗi khi xử lý bảng SignatureTransaction: {e}")
         traceback.print_exc()
     finally:
         mongo_client.close()
         return all_data
 
 
-async def load_signature_transaction(task_config, node_name, start_date, end_date):
+async def load_signature_transaction(node_name, start_date, end_date):
     try:
         table_name = "SignatureTransaction"
-        table_names = await _get_cut_off_name(task_config, node_name, table_name, start_date, end_date)
+        table_names = await _get_cut_off_name(node_name, table_name, start_date, end_date)
         for name in table_names:
-            collection, table, hbase_connection, mongo_client = _init_connect(task_config, node_name, name, "SignatureTransaction")
+            collection, table, hbase_connection, mongo_client = init_connect(config, node_name, name, ["signature_transaction"])
             documents = collection.find({'$and': [
                 {'reqTime': {'$gte': start_date}},
                 {'reqTime': {'$lt': end_date}}]},
@@ -410,7 +395,7 @@ async def load_signature_transaction(task_config, node_name, start_date, end_dat
             mongo_client.close()
 
     except Exception as e:
-        print(f"Lỗi khi xử lý bảng SignatureTransaction: {e}")
+        logger.error(f"Lỗi khi xử lý bảng SignatureTransaction: {e}")
         traceback.print_exc()
 
 
@@ -428,7 +413,7 @@ async def _process_chunks(table, collection_name, documents):
             chunks.append(chunk)
         documents.close()
         # Xử lý các chunks song song
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS):
             tasks = [
                 await asyncio.to_thread(_transfer_chunk_sync, chunk, table, collection_name)
                 for chunk in chunks
@@ -436,9 +421,9 @@ async def _process_chunks(table, collection_name, documents):
             if tasks:
                 await asyncio.gather(*tasks)
 
-        print(f"Chuyển dữ liệu {collection_name} thành công từ MongoDB sang HBase.{i + 1}")
+        logger.info(f"Chuyển {i + 1} bản ghi {collection_name} thành công từ MongoDB sang HBase.")
     except Exception as e:
-        print(f"Lỗi khi xử lý bảng {collection_name}: {e}")
+        logger.error(f"Lỗi khi xử lý bảng {collection_name}: {e}")
         traceback.print_exc()
 
 
@@ -462,15 +447,15 @@ async def _transfer_chunk_sync(chunk, table, collection_name):
             case "SignatureTransaction":
                 await _transfer_signature_transaction(chunk, table)
             case _:
-                print(f"Bảng {collection_name} không được nhận diện.")
+                logger.info(f"Bảng {collection_name} không được nhận diện.")
                 return None
     except Exception as e:
-        print(f"Lỗi trong quá trình xử lý chunk: {e}")
+        logger.error(f"Lỗi trong quá trình xử lý chunk: {e}")
 
 
 async def _transfer_signature_transaction(chunk, table):
     try:
-        batch = table.batch()
+        batch = table[0].batch()
         for document in chunk:
             row_key = str(document["_id"])
             credentialId = str(document.get("credentialId", "")).encode('utf-8')
@@ -518,15 +503,15 @@ async def _transfer_signature_transaction(chunk, table):
             }
             batch.put(row_key, data)
         batch.send()
-        print(f"Batch với {len(chunk)} bản ghi đã được xử lý.")
+        logger.info(f"Batch với {len(chunk)} bản ghi đã được xử lý.")
     except Exception as e:
-        print(f"Lỗi trong quá trình xử lý batch: {e}")
+        logger.error(f"Lỗi trong quá trình xử lý batch: {e}")
         traceback.print_exc()
 
 
 async def _transfer_register(chunk, table):
     try:
-        batch = table.batch()
+        batch = table[0].batch()
         for document in chunk:
             row_key = str(document["_id"])
             status = document.get("status", "")
@@ -535,7 +520,7 @@ async def _transfer_register(chunk, table):
             modifiedDate_check = document.get("modifiedDate", "")
             if modifiedDate_check is not None and modifiedDate_check != "" and modifiedDate_check != datetime(1, 1, 1, 0, 0):
                 modifiedDate = int(modifiedDate_check.timestamp() * 1000)
-            old_item = table.row(row_key)
+            old_item = table[0].row(row_key)
             if old_item is None or old_item == {}:
                 fullName = document.get("fullName", "").encode('utf-8')
                 email = document.get("email", "")
@@ -561,7 +546,7 @@ async def _transfer_register(chunk, table):
                     address = ""
 
                 # Ghi vào HBase
-                table.put(row_key, {
+                table[0].put(row_key, {
                     "register:full_name": fullName,
                     "register:uid": str(uid).encode('utf-8'),
                     "register:phone": str(phone).encode('utf-8'),
@@ -579,21 +564,21 @@ async def _transfer_register(chunk, table):
                 })
             else:
                 if _column_value_exists(table, row_key, "register", "status", status):
-                    table.put(row_key, {'register:status': str(status).encode('utf-8')})
+                    table[0].put(row_key, {'register:status': str(status).encode('utf-8')})
                 if _column_value_exists(table, row_key, "register", "status_desc", statusDesc):
-                    table.put(row_key, {'register:status_desc': str(statusDesc).encode('utf-8')})
+                    table[0].put(row_key, {'register:status_desc': str(statusDesc).encode('utf-8')})
                 if _column_value_exists(table, row_key, "register", "modified_date", modifiedDate):
-                    table.put(row_key, {'register:modified_date': str(modifiedDate).encode('utf-8')})
+                    table[0].put(row_key, {'register:modified_date': str(modifiedDate).encode('utf-8')})
         batch.send()
-        print(f"Batch với {len(chunk)} bản ghi đã được xử lý.")
+        logger.info(f"Batch với {len(chunk)} bản ghi đã được xử lý.")
     except Exception as e:
-        print(f"Lỗi trong quá trình xử lý batch: {e}")
+        logger.error(f"Lỗi trong quá trình xử lý batch: {e}")
         traceback.print_exc()
 
 
 async def _transfer_user(chunk, table):
     try:
-        batch = table.batch()
+        batch = table[0].batch()
         for document in chunk:
             row_key = str(document["_id"])
             status = document.get("status", "")
@@ -609,7 +594,7 @@ async def _transfer_user(chunk, table):
             roles = ", ".join(doc.get('name', '') for doc in role if isinstance(doc, dict))
             preStatus = document.get("preStatus", "")
 
-            old_item = table.row(row_key)
+            old_item = table[0].row(row_key)
             if old_item is None or old_item == {}:
                 uid = document.get("uid", "")
                 username = document.get("username", "")
@@ -647,7 +632,7 @@ async def _transfer_user(chunk, table):
                     address = ""
 
                 # Ghi vào HBase
-                table.put(row_key, {
+                table[0].put(row_key, {
                     "info:uid": str(uid).encode('utf-8'),
                     "info:username": str(username).encode('utf-8'),
                     "info:full_name": fullName,
@@ -680,91 +665,89 @@ async def _transfer_user(chunk, table):
                 })
             else:
                 if _column_value_exists(table, row_key, "ìnfo", "status", status):
-                    table.put(row_key, {'info:status': str(status).encode('utf-8')})
+                    table[0].put(row_key, {'info:status': str(status).encode('utf-8')})
                 if _column_value_exists(table, row_key, "ìnfo", "status_desc", statusDesc):
-                    table.put(row_key, {'info:status_desc': str(statusDesc).encode('utf-8')})
+                    table[0].put(row_key, {'info:status_desc': str(statusDesc).encode('utf-8')})
                 if _column_value_exists(table, row_key, "ìnfo", "modified_date", modifiedDate):
-                    table.put(row_key, {'info:modified_date': str(modifiedDate).encode('utf-8')})
+                    table[0].put(row_key, {'info:modified_date': str(modifiedDate).encode('utf-8')})
                 if _column_value_exists(table, row_key, "ìnfo", "province_code", provinceCode):
-                    table.put(row_key, {'info:province_code': str(provinceCode).encode('utf-8')})
+                    table[0].put(row_key, {'info:province_code': str(provinceCode).encode('utf-8')})
                 if _column_value_exists(table, row_key, "ìnfo", "province_codes", provinceCodes):
-                    table.put(row_key, {'info:province_codes': str(provinceCode_str).encode('utf-8')})
+                    table[0].put(row_key, {'info:province_codes': str(provinceCode_str).encode('utf-8')})
                 if _column_value_exists(table, row_key, "ìnfo", "roles", roles):
-                    table.put(row_key, {'info:roles': str(roles).encode('utf-8')})
+                    table[0].put(row_key, {'info:roles': str(roles).encode('utf-8')})
                 if _column_value_exists(table, row_key, "ìnfo", "pre_status", preStatus):
-                    table.put(row_key, {'info:pre_status': str(preStatus).encode('utf-8')})
+                    table[0].put(row_key, {'info:pre_status': str(preStatus).encode('utf-8')})
         batch.send()
-        print(f"Batch với {len(chunk)} bản ghi đã được xử lý.")
+        logger.info(f"Batch với {len(chunk)} bản ghi đã được xử lý.")
     except Exception as e:
-        print(f"Lỗi trong quá trình xử lý batch: {e}")
+        logger.error(f"Lỗi trong quá trình xử lý batch: {e}")
         traceback.print_exc()
 
 
 async def _transfer_personal_sign_turn_order(chunk, table):
     try:
-        batch = table.batch()
+        batch = table[0].batch()
         for document in chunk:
             row_key = str(document["_id"])
 
-            Status = document.get("Status", "")
+            Status = document.get("Status", None)
             StatusDesc = document.get("StatusDesc", "")
-            UpdatedDate = ""
-            UpdatedDate_check = document.get("UpdatedDate", "")
-            if UpdatedDate_check is not None and UpdatedDate_check != "" and UpdatedDate_check != datetime(1, 1, 1, 0, 0):
-                UpdatedDate = int(UpdatedDate_check.timestamp() * 1000)
-            PaymentStatus = document.get("PaymentStatus", "")
+            UpdatedDate = None
+            UpdatedDate_check = document.get("UpdatedDate", None)
+            if UpdatedDate_check:
+                UpdatedDate = int(UpdatedDate_check.timestamp() * 1000)  # Chuyển thành mili giây
+
+            PaymentStatus = document.get("PaymentStatus", None)
             PaymentStatusDesc = document.get("PaymentStatusDesc", "")
-            TotalMoney = document.get("TotalMoney", "")
+            TotalMoney = document.get("TotalMoney", None)
+            if TotalMoney is not None:
+                TotalMoney = str(TotalMoney)  # Chuyển Decimal về chuỗi
+
             Pricings = document.get('Pricings', [])
-            if Pricings is not None and Pricings != []:
+            if Pricings:
                 Pricing = Pricings[-1]
                 PricingName = Pricing.get("Name", "")
                 PricingCode = Pricing.get("tocdo_id", "")
                 Code = Pricing.get("Code", "")
-                SignTurnNumber = Pricing.get("SignTurnNumber", "")
+                SignTurnNumber = Pricing.get("SignTurnNumber", 0)
             else:
                 PricingName = ""
                 PricingCode = ""
                 Code = ""
                 SignTurnNumber = 0
 
-            old_item = table.row(row_key)
+            old_item = table[0].row(row_key)
             if old_item is None or old_item == {}:
-
                 Indentity = document.get('UserInfo', {})
                 IdentityId = Indentity.get('_id', '')
                 Uid = Indentity.get("Uid", "")
                 FullName = Indentity.get("FullName", "")
                 LocalityCode = Indentity.get("LocalityCode", "")
-                CreatedDate = int(document.get("CreatedDate", "").timestamp() * 1000)
+                CreatedDate = int(document.get("CreatedDate", "").timestamp() * 1000) if document.get("CreatedDate") else None
+
                 DHSXKDCustomerInfo = document.get("DHSXKDCustomerInfo", {})
-                if DHSXKDCustomerInfo is not None and DHSXKDCustomerInfo != {}:
-                    ma_tb = DHSXKDCustomerInfo.get("ma_tb", "")
-                    ma_gd = DHSXKDCustomerInfo.get("ma_gd", "")
-                    ma_kh = DHSXKDCustomerInfo.get("ma_kh", "")
-                    ma_hd = DHSXKDCustomerInfo.get("ma_hd", "")
-                    ma_hrm = DHSXKDCustomerInfo.get("ma_hrm", "")
-                else:
-                    ma_tb = ""
-                    ma_gd = ""
-                    ma_kh = ""
-                    ma_hd = ""
-                    ma_hrm = ""
+                ma_tb = DHSXKDCustomerInfo.get("ma_tb", "")
+                ma_gd = DHSXKDCustomerInfo.get("ma_gd", "")
+                ma_kh = DHSXKDCustomerInfo.get("ma_kh", "")
+                ma_hd = DHSXKDCustomerInfo.get("ma_hd", "")
+                ma_hrm = DHSXKDCustomerInfo.get("ma_hrm", "")
+
                 CredentialId = document.get("CredentialId", "")
                 PaymentOrderId = document.get("PaymentOrderId", "")
-                IsSyncDHSXKD = document.get("IsSyncDHSXKD", "")
+                IsSyncDHSXKD = document.get("IsSyncDHSXKD", False)  # Boolean, kiểm tra nếu không có thì mặc định False
                 MaGt = document.get("MaGt", "")
 
                 # Ghi vào HBase
-                table.put(row_key, {
+                table[0].put(row_key, {
                     "info:identity_id": str(IdentityId).encode('utf-8'),
                     "info:uid": str(Uid).encode('utf-8'),
                     "info:full_name": str(FullName).encode('utf-8'),
                     "info:locality_code": str(LocalityCode).encode('utf-8'),
-                    "info:status": str(Status).encode('utf-8'),
+                    "info:status": str(Status).encode('utf-8') if Status is not None else b"",
                     "info:status_desc": str(StatusDesc).encode('utf-8'),
-                    "info:created_date": str(CreatedDate).encode('utf-8'),
-                    "info:updated_date": str(UpdatedDate).encode('utf-8'),
+                    "info:created_date": str(CreatedDate).encode('utf-8') if CreatedDate else b"",
+                    "info:updated_date": str(UpdatedDate).encode('utf-8') if UpdatedDate else b"",
                     "info:ma_tb": str(ma_tb).encode('utf-8'),
                     "info:ma_gd": str(ma_gd).encode('utf-8'),
                     "info:ma_kh": str(ma_kh).encode('utf-8'),
@@ -772,7 +755,7 @@ async def _transfer_personal_sign_turn_order(chunk, table):
                     "info:ma_hrm": str(ma_hrm).encode('utf-8'),
                     "info:credential_id": str(CredentialId).encode('utf-8'),
                     "info:payment_order_id": str(PaymentOrderId).encode('utf-8'),
-                    "info:payment_status": str(PaymentStatus).encode('utf-8'),
+                    "info:payment_status": str(PaymentStatus).encode('utf-8') if PaymentStatus is not None else b"",
                     "info:payment_status_desc": str(PaymentStatusDesc).encode('utf-8'),
                     "info:is_sync_dhsxkd": str(IsSyncDHSXKD).encode('utf-8'),
                     "info:ma_gt": str(MaGt).encode('utf-8'),
@@ -780,40 +763,41 @@ async def _transfer_personal_sign_turn_order(chunk, table):
                     "info:pricing_code": str(PricingCode).encode('utf-8'),
                     "info:code": str(Code).encode('utf-8'),
                     "info:sign_turn_number": str(SignTurnNumber).encode('utf-8'),
-                    "info:total_money": str(TotalMoney).encode('utf-8')
+                    "info:total_money": str(TotalMoney).encode('utf-8') if TotalMoney is not None else b""
                 })
             else:
-                if _column_value_exists(table, row_key, "ìnfo", "status", Status):
-                    table.put(row_key, {'info:status': str(Status).encode('utf-8')})
-                if _column_value_exists(table, row_key, "ìnfo", "status_desc", StatusDesc):
-                    table.put(row_key, {'info:status_desc': str(StatusDesc).encode('utf-8')})
-                if _column_value_exists(table, row_key, "ìnfo", "updated_date", UpdatedDate):
-                    table.put(row_key, {'info:updated_date': str(UpdatedDate).encode('utf-8')})
-                if _column_value_exists(table, row_key, "ìnfo", "payment_status", PaymentStatus):
-                    table.put(row_key, {'info:payment_status': str(PaymentStatus).encode('utf-8')})
-                if _column_value_exists(table, row_key, "ìnfo", "payment_status_desc", PaymentStatusDesc):
-                    table.put(row_key, {'info:payment_status_desc': str(PaymentStatusDesc).encode('utf-8')})
-                if _column_value_exists(table, row_key, "ìnfo", "pricing_name", PricingName):
-                    table.put(row_key, {'info:pricing_name': str(PricingName).encode('utf-8')})
-                if _column_value_exists(table, row_key, "ìnfo", "pricing_code", PricingCode):
-                    table.put(row_key, {'info:pricing_code': str(PricingCode).encode('utf-8')})
-                if _column_value_exists(table, row_key, "ìnfo", "code", Code):
-                    table.put(row_key, {'info:code': str(Code).encode('utf-8')})
-                if _column_value_exists(table, row_key, "ìnfo", "sign_turn_number", SignTurnNumber):
-                    table.put(row_key, {'info:sign_turn_number': str(SignTurnNumber).encode('utf-8')})
-                if _column_value_exists(table, row_key, "ìnfo", "total_money", TotalMoney):
-                    table.put(row_key, {'info:total_money': str(TotalMoney).encode('utf-8')})
+                # Cập nhật các trường nếu có thay đổi
+                if _column_value_exists(table, row_key, "info", "status", Status):
+                    table[0].put(row_key, {'info:status': str(Status).encode('utf-8')})
+                if _column_value_exists(table, row_key, "info", "status_desc", StatusDesc):
+                    table[0].put(row_key, {'info:status_desc': str(StatusDesc).encode('utf-8')})
+                if _column_value_exists(table, row_key, "info", "updated_date", UpdatedDate):
+                    table[0].put(row_key, {'info:updated_date': str(UpdatedDate).encode('utf-8')})
+                if _column_value_exists(table, row_key, "info", "payment_status", PaymentStatus):
+                    table[0].put(row_key, {'info:payment_status': str(PaymentStatus).encode('utf-8')})
+                if _column_value_exists(table, row_key, "info", "payment_status_desc", PaymentStatusDesc):
+                    table[0].put(row_key, {'info:payment_status_desc': str(PaymentStatusDesc).encode('utf-8')})
+                if _column_value_exists(table, row_key, "info", "pricing_name", PricingName):
+                    table[0].put(row_key, {'info:pricing_name': str(PricingName).encode('utf-8')})
+                if _column_value_exists(table, row_key, "info", "pricing_code", PricingCode):
+                    table[0].put(row_key, {'info:pricing_code': str(PricingCode).encode('utf-8')})
+                if _column_value_exists(table, row_key, "info", "code", Code):
+                    table[0].put(row_key, {'info:code': str(Code).encode('utf-8')})
+                if _column_value_exists(table, row_key, "info", "sign_turn_number", SignTurnNumber):
+                    table[0].put(row_key, {'info:sign_turn_number': str(SignTurnNumber).encode('utf-8')})
+                if _column_value_exists(table, row_key, "info", "total_money", TotalMoney):
+                    table[0].put(row_key, {'info:total_money': str(TotalMoney).encode('utf-8')})
         batch.send()
-        print(f"Batch với {len(chunk)} bản ghi đã được xử lý.")
+        logger.info(f"Batch với {len(chunk)} bản ghi đã được xử lý.")
     except Exception as e:
-        print(f"Lỗi trong quá trình xử lý batch: {e}")
+        logger.error(f"Lỗi trong quá trình xử lý batch: {e}")
         traceback.print_exc()
 
 
 async def _transfer_request_cert(chunk, table):
     keyword = "OPER"
     try:
-        batch = table.batch()
+        batch = table[0].batch()
         for document in chunk:
             row_key = str(document["_id"]).encode('utf-8')
             status = str(document.get("status", "")).encode('utf-8')
@@ -826,7 +810,7 @@ async def _transfer_request_cert(chunk, table):
             approveTime_check = document.get("approveTime", "")
             if approveTime_check is not None and approveTime_check != "" and approveTime_check != datetime(1, 1, 1, 0, 0):
                 approveTime = str(int(approveTime_check.timestamp() * 1000)).encode('utf-8')
-            old_item = table.row(row_key)
+            old_item = table[0].row(row_key)
             if old_item is None or old_item == {}:
                 credentialId = str(document.get("credentialId", "")).encode('utf-8')
 
@@ -851,7 +835,7 @@ async def _transfer_request_cert(chunk, table):
                 requestType = str(document.get("requestType", "")).encode('utf-8')
                 requestTypeDesc = str(document.get("requestTypeDesc", "")).encode('utf-8')
                 # Ghi vào HBase
-                table.put(row_key, {
+                table[0].put(row_key, {
                     "info:credential_id": credentialId,
                     "info:status": status,
                     "info:status_desc": statusDesc,
@@ -874,23 +858,23 @@ async def _transfer_request_cert(chunk, table):
                 })
             else:
                 if _column_value_exists(table, row_key, "ìnfo", "status", status):
-                    table.put(row_key, {'info:status': status})
+                    table[0].put(row_key, {'info:status': status})
                 if _column_value_exists(table, row_key, "ìnfo", "status_desc", statusDesc):
-                    table.put(row_key, {'info:status_desc': statusDesc})
+                    table[0].put(row_key, {'info:status_desc': statusDesc})
                 if _column_value_exists(table, row_key, "ìnfo", "updated_time", updatedTime):
-                    table.put(row_key, {'info:updated_time': updatedTime})
+                    table[0].put(row_key, {'info:updated_time': updatedTime})
                 if _column_value_exists(table, row_key, "ìnfo", "approve_time", approveTime):
-                    table.put(row_key, {'info:approve_time': approveTime})
+                    table[0].put(row_key, {'info:approve_time': approveTime})
         batch.send()
-        print(f"Batch với {len(chunk)} bản ghi đã được xử lý.")
+        logger.info(f"Batch với {len(chunk)} bản ghi đã được xử lý.")
     except Exception as e:
-        print(f"Lỗi trong quá trình xử lý batch: {e}")
+        logger.error(f"Lỗi trong quá trình xử lý batch: {e}")
         traceback.print_exc()
 
 
 async def _transfer_cert(chunk, table):
     try:
-        batch = table.batch()
+        batch = table[0].batch()
         for document in chunk:
             row_key = str(document["requestId"])
             serial = str(document.get("serial", "")).encode('utf-8')
@@ -901,7 +885,7 @@ async def _transfer_cert(chunk, table):
             validTo = str(int(document.get("validTo", "").timestamp() * 1000))
             createdDate = str(int(document.get("createDate", "").timestamp() * 1000))
             # Ghi vào HBase
-            table.put(row_key, {
+            table[0].put(row_key, {
                 "info:cert_status": status,
                 "info:cert_status_desc": statusDesc,
                 "info:serial": serial,
@@ -911,15 +895,16 @@ async def _transfer_cert(chunk, table):
                 "info:cert_created_date": createdDate,
             })
         batch.send()
-        print(f"Batch với {len(chunk)} bản ghi đã được xử lý.")
+        logger.info(f"Batch với {len(chunk)} bản ghi đã được xử lý.")
     except Exception as e:
-        print(f"Lỗi trong quá trình xử lý batch: {e}")
+        logger.error(f"Lỗi trong quá trình xử lý batch: {e}")
         traceback.print_exc()
 
 
 async def _transfer_credential(chunk, table):
     try:
-        batch = table.batch()
+        batch_credential = table[0].batch()
+        batch_log = table[1].batch()
         keyword = "OPER"
         pricing_ps0 = {
             "Chứng thư số cá nhân trên các ứng dụng",
@@ -972,7 +957,8 @@ async def _transfer_credential(chunk, table):
                 certStatus = ""
                 certStatusDesc = ""
 
-            old_item = table.row(row_key)
+            # Kiểm tra record đã tồn tại trong bảng credential hay chưa
+            old_item = table[0].row(row_key)
             if old_item is None or old_item == {}:
 
                 createdDate = int(document.get("createdDate", "").timestamp() * 1000)
@@ -1003,7 +989,7 @@ async def _transfer_credential(chunk, table):
                 serviceType = document.get("contract", "").get("serviceType", "")
 
                 # Ghi vào HBase
-                table.put(row_key, {
+                table[0].put(row_key, {
                     "info:subject_dn": str(subjectDN).encode('utf-8'),
                     "info:status": str(status).encode('utf-8'),
                     "info:status_desc": str(statusDesc).encode('utf-8'),
@@ -1038,34 +1024,35 @@ async def _transfer_credential(chunk, table):
 
             else:
                 if _column_value_exists(table, row_key, "ìnfo", "status", status):
-                    table.put(row_key, {'info:status': str(status).encode('utf-8')})
-                    table.put(row_key, {f'status_log:{date_str}': str(status).encode('utf-8')})
+                    table[0].put(row_key, {'info:status': str(status).encode('utf-8')})
+                    table[0].put(row_key, {f'status_log:{date_str}': str(status).encode('utf-8')})
                 if _column_value_exists(table, row_key, "ìnfo", "status_desc", statusDesc):
-                    table.put(row_key, {'info:status_desc': str(statusDesc).encode('utf-8')})
+                    table[0].put(row_key, {'info:status_desc': str(statusDesc).encode('utf-8')})
                 if _column_value_exists(table, row_key, "ìnfo", "modified_date", modifiedDate):
-                    table.put(row_key, {'info:modified_date': str(modifiedDate).encode('utf-8')})
+                    table[0].put(row_key, {'info:modified_date': str(modifiedDate).encode('utf-8')})
                 if _column_value_exists(table, row_key, "ìnfo", "serial", serial):
-                    table.put(row_key, {'info:serial': str(serial).encode('utf-8')})
+                    table[0].put(row_key, {'info:serial': str(serial).encode('utf-8')})
                 if _column_value_exists(table, row_key, "ìnfo", "valid_from", validFrom):
-                    table.put(row_key, {'info:valid_from': str(validFrom).encode('utf-8')})
+                    table[0].put(row_key, {'info:valid_from': str(validFrom).encode('utf-8')})
                 if _column_value_exists(table, row_key, "ìnfo", "valid_to", validTo):
-                    table.put(row_key, {'info:valid_to': str(validTo).encode('utf-8')})
+                    table[0].put(row_key, {'info:valid_to': str(validTo).encode('utf-8')})
                 if _column_value_exists(table, row_key, "ìnfo", "request_cert_id", requestCertId):
-                    table.put(row_key, {'info:request_cert_id': str(requestCertId).encode('utf-8')})
+                    table[0].put(row_key, {'info:request_cert_id': str(requestCertId).encode('utf-8')})
                 if _column_value_exists(table, row_key, "ìnfo", "cert_status", certStatus):
-                    table.put(row_key, {'info:cert_status': str(certStatus).encode('utf-8')})
+                    table[0].put(row_key, {'info:cert_status': str(certStatus).encode('utf-8')})
                 if _column_value_exists(table, row_key, "ìnfo", "cert_status_desc", certStatusDesc):
-                    table.put(row_key, {'info:cert_status_desc': str(certStatusDesc).encode('utf-8')})
-        batch.send()
-        print(f"Batch với {len(chunk)} bản ghi đã được xử lý.")
+                    table[0].put(row_key, {'info:cert_status_desc': str(certStatusDesc).encode('utf-8')})
+        batch_credential.send()
+        batch_log.send()
+        logger.info(f"Batch với {len(chunk)} bản ghi đã được xử lý.")
     except Exception as e:
-        print(f"Lỗi trong quá trình xử lý batch: {e}")
+        logger.error(f"Lỗi trong quá trình xử lý batch: {e}")
         traceback.print_exc()
 
 
 def _column_value_exists(table, row_key, column_family, column_name, new_value):
     # Lấy giá trị hiện tại của cột
-    current_value = table.row(row_key).get(f'{column_family}:{column_name}')
+    current_value = table[0].row(row_key).get(f'{column_family}:{column_name}')
     check = current_value is not None and current_value != new_value and current_value != ''
     # So sánh giá trị hiện tại với giá trị mới
     return check

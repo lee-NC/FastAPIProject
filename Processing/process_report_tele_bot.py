@@ -1,58 +1,26 @@
 import io
-import json
 import os
 import sys
 from datetime import datetime, timedelta
 import traceback
-import happybase
 import pandas as pd
 import pyarrow as pa
+import logging
 import pyarrow.parquet as pq
 from dateutil.relativedelta import relativedelta
-from hdfs import InsecureClient
 from telegram import Bot
 from telegram import InputFile
-
+from Helper.config import Config, init_connect_report, init_connect_tele
 from Model.DataModel import *
 
 sys.path.append(os.path.abspath("HBase/Model"))
+logger = logging.getLogger("Lakehouse")
+
+config = Config()
 
 
-def _init_connect(task_file):
-    try:
-        with open(task_file, 'r') as f:
-            task_config = json.load(f)
-        hbase = task_config["hbase"]
-        hbase_uri = hbase["uri"]
-        hdfs_info = task_config["hdfs"]
-        client = InsecureClient(f'http://{hdfs_info["name_node_host"]}:{hdfs_info["port"]}', user=hdfs_info["username"])
-        hbase_connection = happybase.Connection(hbase_uri)
-        tables = hbase_connection.tables()  # Liệt kê các bảng
-        print(f"Kết nối thành công! {tables}")
-        return hbase_connection, client
-    except Exception as e:
-        print(f"Lỗi kết nối: {e}")
-        traceback.print_exc()
-        raise
-
-
-def _init_connect_tele(task_file):
-    try:
-        with open(task_file, 'r') as f:
-            task_config = json.load(f)
-        access_token = task_config["telegram"]["access_token"]
-        chat_id = task_config["telegram"]["chat_id"]
-        if access_token is None or chat_id is None:
-            print(f"Thiếu cấu hình telegram")
-        return access_token, chat_id
-    except Exception as e:
-        print(f"Thiếu cấu hình: {e}")
-        traceback.print_exc()
-        raise
-
-
-async def processing_signature_transaction(date_now, task_file):
-    (hbase_connection, hdfs_client) = _init_connect(task_file)
+async def processing_signature_transaction(date_now):
+    (hbase_connection, hdfs_client) = init_connect_report(config)
     temp_time = f"{date_now.year}-{date_now.month}-01T17:00:00.000Z"
     end_date = datetime.strptime(temp_time, "%Y-%m-%dT%H:%M:%S.%fZ") - timedelta(days=1)
     start_date = end_date - relativedelta(months=1)
@@ -73,7 +41,7 @@ async def processing_signature_transaction(date_now, task_file):
         for key, data in rows:
             appId = str(data.get(b'info:app_id').decode('utf-8'))
             appName = str(data.get(b'info:app_name').decode('utf-8'))
-            reqTime = float(str(data.get(b'info:req_time').decode('utf-8')))/1000
+            reqTime = float(str(data.get(b'info:req_time').decode('utf-8'))) / 1000
             month = datetime.fromtimestamp(timestamp=reqTime).strftime('%Y-%m')
             success = 0
             unSuccess = 0
@@ -119,19 +87,19 @@ async def processing_signature_transaction(date_now, task_file):
         return mess
     #endregion
     #region gửi file lên bot tele
-    await send_excel_to_telegram(excel_buffer=_convert_to_excel(grouped), task_file=task_file, file_name=file_name)
+    await send_excel_to_telegram(excel_buffer=_convert_to_excel(grouped), file_name=file_name)
     # endregion
     hbase_connection.close()
     return ""
 
 
-async def job_signature_transaction(task_file):
+async def job_signature_transaction():
     date_now = datetime.now()
-    await processing_signature_transaction(date_now, task_file)
+    await processing_signature_transaction(date_now, )
 
 
-async def processing_accumulate_credential(date_now, task_file):
-    (hbase_connection, hdfs_client) = _init_connect(task_file)
+async def processing_accumulate_credential(date_now):
+    (hbase_connection, hdfs_client) = init_connect_report(config)
     temp_time = f"{date_now.year}-{date_now.month}-{date_now.day - 1}T17:00:00.000Z"
     end_date = datetime.strptime(temp_time, "%Y-%m-%dT%H:%M:%S.%fZ")
     start_date = end_date - timedelta(days=1)
@@ -157,11 +125,11 @@ async def processing_accumulate_credential(date_now, task_file):
             locality_code = data.get(b'info:locality_code').decode('utf-8')
             if data.get(b'info:valid_from') is None or data.get(b'info:valid_from') == b'':
                 continue
-            valid_from = datetime.fromtimestamp(timestamp=(float(str(data.get(b'info:valid_from').decode('utf-8')))/1000))
+            valid_from = datetime.fromtimestamp(timestamp=(float(str(data.get(b'info:valid_from').decode('utf-8'))) / 1000))
             if data.get(b'info:valid_to') is None or data.get(b'info:valid_to') == b'':
                 continue
             item_el = AccumulateCert(locality_code=locality_code)
-            valid_to = datetime.fromtimestamp(timestamp=(float(str(data.get(b'info:valid_to').decode('utf-8')))/1000))
+            valid_to = datetime.fromtimestamp(timestamp=(float(str(data.get(b'info:valid_to').decode('utf-8'))) / 1000))
             # check valid
             check_valid = int(valid_to > end_date)
             check_year_create = int(start_year <= valid_from < end_date)
@@ -232,7 +200,7 @@ async def processing_accumulate_credential(date_now, task_file):
             date = data.get(b'info:created_date')
             if date is None or date == b'' or date == b'0':
                 continue
-            created_date = datetime.fromtimestamp(timestamp=(float(str(date.decode('utf-8')))/1000))
+            created_date = datetime.fromtimestamp(timestamp=(float(str(date.decode('utf-8'))) / 1000))
             request_type = data.get(b'info:request_type')
             credential_id = data.get(b'info:credential_id').decode('utf-8')
             # check valid
@@ -462,19 +430,19 @@ async def processing_accumulate_credential(date_now, task_file):
                     f"Sản lượng CTS được đăng ký và khởi tạo online toàn trình trong ngày {end_date_str}"]
     grouped = grouped.drop('date_report', axis=1)
     grouped.columns = header_index
-    await send_excel_to_telegram(excel_buffer=_convert_to_excel(grouped), task_file=task_file, file_name=file_name)
+    await send_excel_to_telegram(excel_buffer=_convert_to_excel(grouped), file_name=file_name)
     #endregion
     hbase_connection.close()
     return ""
 
 
-async def job_accumulate_credential(task_file):
+async def job_accumulate_credential():
     date_now = datetime.now()
-    await processing_accumulate_credential(date_now, task_file)
+    await processing_accumulate_credential(date_now, )
 
 
-async def processing_cert_order_register(date_now, task_file):
-    (hbase_connection, hdfs_client) = _init_connect(task_file)
+async def processing_cert_order_register(date_now):
+    (hbase_connection, hdfs_client) = init_connect_report(config)
     temp_time = f"{date_now.year}-{date_now.month}-01T17:00:00.000Z"
     end_date = datetime.strptime(temp_time, "%Y-%m-%dT%H:%M:%S.%fZ") - timedelta(days=1)
     start_date = end_date - relativedelta(months=1)
@@ -514,12 +482,12 @@ async def processing_cert_order_register(date_now, task_file):
             item.ma_tb = _check_status_string(data.get(b'info:ma_tb').decode('utf-8'))
             item.ma_don_hang = _check_status_string(data.get(b'info:ma_gd').decode('utf-8'))
             item.dia_chi_ct = _check_status_string(data.get(b'info:address').decode('utf-8'))
-            created_date = datetime.fromtimestamp(timestamp=(float(str(data.get(b'info:created_date').decode('utf-8')))/1000))
+            created_date = datetime.fromtimestamp(timestamp=(float(str(data.get(b'info:created_date').decode('utf-8'))) / 1000))
             if created_date != 'None' and created_date != b'' and created_date != b"":
                 item.ngay_tao_don = (created_date + timedelta(hours=7)).strftime("%Y/%m/%d %H:%M:%S")
             log_created_date = data.get(b'info:log_created_date').decode('utf-8')
             if log_created_date != 'None' and log_created_date != b'' and log_created_date != b"":
-                item.ngay_thuc_hien = (datetime.fromtimestamp(timestamp=(float(str(log_created_date))/1000)) + timedelta(hours=7)).strftime(
+                item.ngay_thuc_hien = (datetime.fromtimestamp(timestamp=(float(str(log_created_date)) / 1000)) + timedelta(hours=7)).strftime(
                     "%Y/%m/%d %H:%M:%S")
                 item.nguyen_nhan = data.get(b'info:log_content').decode('utf-8')
             item.kenh_ban = _check_status_string(data.get(b'info:client_name').decode('utf-8'))
@@ -567,12 +535,13 @@ async def processing_cert_order_register(date_now, task_file):
             item.ten_kh = _check_status_string(data.get(b'register:full_name').decode('utf-8'))
             item.so_gt = _check_status_string(data.get(b'register:uid').decode('utf-8'))
             item.dia_chi_ct = _check_status_string(data.get(b'register:address').decode('utf-8'))
-            created_date = datetime.fromtimestamp(timestamp=(float(str(_check_status_string(data.get(b'register:create_date').decode('utf-8'))))/1000))
+            created_date = datetime.fromtimestamp(
+                timestamp=(float(str(_check_status_string(data.get(b'register:create_date').decode('utf-8')))) / 1000))
             if created_date != 'None' and created_date != b'' and created_date != b"":
                 item.ngay_tao_don = (created_date + timedelta(hours=7)).strftime("%Y/%m/%d %H:%M:%S")
             log_created_date = _check_status_string(data.get(b'register:modified_date').decode('utf-8'))
             if log_created_date != 'None' and log_created_date != b'' and log_created_date != b"":
-                item.ngay_thuc_hien = _check_status_string((datetime.fromtimestamp(timestamp=(float(str(log_created_date))/1000)) +
+                item.ngay_thuc_hien = _check_status_string((datetime.fromtimestamp(timestamp=(float(str(log_created_date)) / 1000)) +
                                                             timedelta(hours=7)).strftime("%Y/%m/%d %H:%M:%S"))
             else:
                 item.ngay_thuc_hien = item.ngay_tao_don
@@ -671,15 +640,15 @@ async def processing_cert_order_register(date_now, task_file):
         'Trạng thái tài khoản'
     ]
     grouped.columns = header_index
-    await send_excel_to_telegram(excel_buffer=_convert_to_excel(grouped), task_file=task_file, file_name=file_name)
+    await send_excel_to_telegram(excel_buffer=_convert_to_excel(grouped), file_name=file_name)
     # endregion
     hbase_connection.close()
     return ""
 
 
-async def job_cert_order_register(task_file):
+async def job_cert_order_register():
     date_now = datetime.now()
-    await processing_cert_order_register(date_now, task_file)
+    await processing_cert_order_register(date_now, )
 
 
 def _save_file_hdfs(hdfs_client, file_path, table_result):
@@ -720,9 +689,9 @@ def _convert_to_excel(df):
     return excel_buffer
 
 
-async def send_excel_to_telegram(excel_buffer, task_file, file_name):
+async def send_excel_to_telegram(excel_buffer, file_name):
     try:
-        access_token, chat_id = _init_connect_tele(task_file)
+        access_token, chat_id = init_connect_tele(config)
         bot = Bot(token=access_token)
         # Tạo InputFile từ buffer
         excel_buffer.name = f"{file_name}.xlsx"  # Cung cấp tên cho file khi gửi

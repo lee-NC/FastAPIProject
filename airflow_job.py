@@ -1,43 +1,31 @@
 import asyncio
 import os
 import sys
-from pathlib import Path
-
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from dotenv import load_dotenv
-
-from main import task_file
 
 sys.path.append(os.path.abspath("Processing"))
+sys.path.append(os.path.abspath("Helper"))
 from Processing.load_fact_tables import process_fetch_tables
 from Processing.process_report_tele_bot import *
 from Processing.transfer_data import cut_off_data
+from Helper.config import Config
+from Helper.custom_logging import setup_logging
 
-load_dotenv("config/config.env", override=True)
-ENV = os.getenv('ENV', 'development')
-directory = Path('config')
-task_files = [f.name for f in directory.iterdir() if f.is_file()]
-name_files = []
-if ENV == 'production':
-    name_files = [file for file in task_files if "production" in file]
-else:
-    name_files = [file for file in task_files if "development" in file]
+config = Config().get_config()
 
-if not name_files or name_files == []:
-    print("No configuration file found!")
-    sys.exit(1)
-task_file = f"config/{name_files[0]}"
+LOG_DIR = config["log"]["path"]
+logger = setup_logging(LOG_DIR)
 
 
 def run_fact_tables():
     # Chạy coroutine trong vòng lặp sự kiện
-    asyncio.run(process_fetch_tables(task_file))
+    asyncio.run(process_fetch_tables())
 
 
 def run_process_signature_transaction():
     # Chạy coroutine trong vòng lặp sự kiện
-    asyncio.run(job_accumulate_credential(task_file))
+    asyncio.run(job_accumulate_credential())
 
 
 def run_process_accumulate_credential():
@@ -47,12 +35,12 @@ def run_process_accumulate_credential():
 
 def run_processing_cert_order_register():
     # Chạy coroutine trong vòng lặp sự kiện
-    asyncio.run(job_cert_order_register(task_file))
+    asyncio.run(job_cert_order_register())
 
 
 def run_cut_off_signature_transaction():
     # Chạy coroutine trong vòng lặp sự kiện
-    asyncio.run(cut_off_data(task_file, "signature_transaction"))
+    asyncio.run(cut_off_data("signature_transaction"))
 
 
 default_args = {
@@ -71,21 +59,20 @@ dag1 = DAG(
 )
 
 run_task1 = PythonOperator(
-    task_id='process_success_by_month_app',
-    python_callable=process_fetch_tables(),
+    task_id='process_signature_transaction_by_month_app',
+    python_callable=run_fact_tables,
     dag=dag1
 )
 
 dag2 = DAG(
-    'process_success_by_month_app',
+    'process_signature_transaction_by_month_app',
     default_args=default_args,
     schedule_interval='5 12 * 1 *',  # At 12:05 in January
     catchup=False
 )
 
-
 run_task2 = PythonOperator(
-    task_id='process_success_by_month_app',
+    task_id='process_signature_transaction_by_month_app',
     python_callable=run_process_signature_transaction,
     dag=dag2
 )

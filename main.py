@@ -1,54 +1,24 @@
 import os
 import sys
-from pathlib import Path
-import logging
-from logging.handlers import TimedRotatingFileHandler
+import time
+from fastapi import FastAPI, HTTPException, Request
 
-from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
-
-from Model.Request import *
-
+sys.path.append(os.path.abspath("Model"))
 sys.path.append(os.path.abspath("Processing"))
+sys.path.append(os.path.abspath("Helper"))
+
 from Processing.load_fact_tables import process_fetch_tables
 from Processing.process_report_tele_bot import *
 from Processing.transfer_data import cut_off_data
+from Model.Request import *
 
-sys.path.append(os.path.abspath("Model"))
+from Helper.config import Config
+from Helper.custom_logging import setup_logging
 
-load_dotenv("config/config.env", override=True)
-ENV = os.getenv('ENV', 'development')
+config = Config().get_config()
 
-
-def get_config():
-    directory = Path('config')
-    task_files = [f.name for f in directory.iterdir() if f.is_file()]
-    if ENV == 'production':
-        return [file for file in task_files if "production" in file]
-    else:
-        return [file for file in task_files if "development" in file]
-
-
-name_files = get_config()
-if not name_files:
-    print("No configuration file found!")
-    sys.exit(1)
-task_file = f"config/{name_files[0]}"
-
-log_dir = task_file["log"]["path"]
-os.makedirs(log_dir, exist_ok=True)
-
-# Định dạng log
-log_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-
-# Tạo handler ghi log theo ngày
-log_file = os.path.join(log_dir, "lakehouse.log")
-log_handler = TimedRotatingFileHandler(log_file, when="midnight", interval=1, backupCount=30, encoding="utf-8")
-log_handler.setFormatter(log_formatter)
-log_handler.suffix = "%Y-%m-%d"  # Chia log theo ngày
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
-logger.addHandler(log_handler)
+LOG_DIR = config["log"]["path"]
+logger = setup_logging(LOG_DIR)
 app = FastAPI()
 
 
@@ -60,7 +30,7 @@ async def read_root():
 @app.get("/fetch_data", summary="fetch data", description="fetch data")
 async def fetch_data():
     try:
-        mess = await process_fetch_tables(task_file)
+        mess = await process_fetch_tables()
         return HTTPException(status_code=200, detail=mess)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -69,37 +39,37 @@ async def fetch_data():
 @app.get("/report_cumulative_credential", summary="Báo cáo lũy kế", description="Báo cáo lũy kế")
 async def report_cumulative_credential(request: ReportRequest):
     date = request.date
-    logger.info(f"report_cumulative_credential at {datetime.now()} with param {date}")
+    logger.info(f"report_cumulative_credential at {datetime.datetime.now()} with param {date}")
     try:
         if date is None:
             raise HTTPException(status_code=400, detail="Date is required")
-        mess = await processing_accumulate_credential(date, task_file)
+        mess = await processing_accumulate_credential(date)
         return HTTPException(status_code=200, detail=mess)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/signature_transaction", summary="signature_transaction", description="signature_transaction")
+@app.get("/report_accumulate_signature_transaction", summary="Thống kê giao dịch theo tháng", description="Thống kê giao dịch theo tháng")
 async def signature_transaction(request: ReportRequest):
     date = request.date
-    logger.info(f"get_trang_thai_giao_dich at {datetime.now()} with param {date}")
+    logger.info(f"report_accumulate_signature_transaction at {datetime.datetime.now()} with param {date}")
     try:
         if date is None:
             raise HTTPException(status_code=400, detail="Date is required")
-        mess = await processing_signature_transaction(date, task_file)
+        mess = await processing_signature_transaction(date)
         return HTTPException(status_code=200, detail=mess)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/cert_order_register", summary="cert_order_register", description="cert_order_register")
+@app.get("/report_accumulate_cert_order_register", summary="Thống kê đơn hàng và đăng ký", description="Thống kê đơn hàng và đăng ký")
 async def cert_order_register(request: ReportRequest):
     date = request.date
-    logger.info(f"get_cert_order_register at {datetime.now()} with param {date}")
+    logger.info(f"report_accumulate_cert_order_register at {datetime.datetime.now()} with param {date}")
     try:
         if date is None:
             raise HTTPException(status_code=400, detail="Date is required")
-        mess = await processing_cert_order_register(date, task_file)
+        mess = await processing_cert_order_register(date)
         return HTTPException(status_code=200, detail=mess)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -108,17 +78,45 @@ async def cert_order_register(request: ReportRequest):
 @app.get("/cut_off_data", summary="cut_off_data", description="cut_off_data")
 async def cut_off_data(request: CutOffRequest):
     table_name = request.table_name
-    logger.info(f"cut_off_data at {datetime.now()} with param {table_name}")
+    logger.info(f"cut_off_data at {datetime.datetime.now()} with param {table_name}")
     try:
         if table_name is None:
             raise HTTPException(status_code=400, detail="table_name is required")
-        check = await cut_off_data(task_file, table_name)
+        check = await cut_off_data(config, table_name)
         mess = "Transfer data successfully!"
         if not check:
             mess = "Transfer data failed!"
         return HTTPException(status_code=200, detail=mess)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start_time = time.time()
+
+    logger.info(f"Request: {request.method} {request.url}")
+
+    response = await call_next(request)
+
+    duration = time.time() - start_time
+    logger.info(f"Response: {response.status_code} - Time taken: {duration:.4f}s")
+
+    return response
+
+
+@app.middleware("https")
+async def log_requests(request: Request, call_next):
+    start_time = time.time()
+
+    logger.info(f"Request: {request.method} {request.url}")
+
+    response = await call_next(request)
+
+    duration = time.time() - start_time
+    logger.info(f"Response: {response.status_code} - Time taken: {duration:.4f}s")
+
+    return response
 
 
 if __name__ == "__main__":
