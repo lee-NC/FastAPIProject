@@ -1,0 +1,28 @@
+{
+  "mongo": {
+    "identity_uri": "mongodb://:27017/",
+    "csc_uri": "mongodb://:27017/",
+    "vneid_uri": "mongodb://:27017/",
+    "report_uri": "mongodb://:27017/"
+  },
+  "hbase": {
+    "uri": "localhost",
+    "port": "2181"
+  },
+  "spark": {
+    "app_name": "SparkHBaseTest",
+    "port": "8081"
+  },
+  "telegram": {
+    "access_token": "",
+    "chat_id": ""
+  },
+  "hdfs": {
+    "username": "vnpt",
+    "name_node_host": "localhost",
+    "port": "9870"
+  },
+  "log": {
+    "path": "/usr/local/log_lakehouse"
+  }
+}
