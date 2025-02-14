@@ -35,7 +35,7 @@ async def load_data_identity(start_date, end_date):
 
 
 async def load_cert_order(node_name, start_date, end_date):
-    collection, table, hbase_connection, mongo_client = init_connect(config, node_name, "CertOrder", ["cert_order"])
+    collection, table, hbase_connection, mongo_client = init_connect(config, node_name, "CertOrder", ["CERT_ORDER"])
     try:
         documents = collection.find({'$and': [
             {'$or': [{'CreatedDate': {'$gte': start_date}}, {'UpdatedDate': {'gte': start_date}}]},
@@ -52,24 +52,25 @@ async def load_cert_order(node_name, start_date, end_date):
     logger.info("Chuyển dữ liệu CertOrder thành công từ MongoDB sang HBase.")
 
 
-async def _transfer_cert_order(chunk, table):
-    batch = table[0].batch()
+async def _transfer_cert_order(chunk, tables):
+    table = tables[0]
+    batch = table.batch()
     try:
         for document in chunk:
             FullName = document.get("FullName", "")
-            if FullName is not None and ("test" in FullName or "Test" in FullName or "TEST" in FullName):
+            if FullName and "test" in FullName.lower():
                 continue
             Pricing = document.get("Pricing", {})
             if Pricing is None or Pricing is {}:
                 continue
             PricingName = Pricing.get("PricingName", "")
-            if PricingName is not None and ("test" in PricingName or "Test" in PricingName or "TEST" in PricingName):
+            if PricingName and "test" in PricingName.lower():
                 continue
             DHSXKDCustomerInfo = document.get("DHSXKDCustomerInfo", {})
             if DHSXKDCustomerInfo is None or DHSXKDCustomerInfo is {}:
                 continue
             ma_gd = DHSXKDCustomerInfo.get("ma_gd", "")
-            if ma_gd is not None and ("test" in ma_gd or "Test" in ma_gd or "TEST" in ma_gd):
+            if ma_gd and "test" in ma_gd.lower():
                 continue
             row_key = str(document["_id"])
             Status = document.get("Status", "")
@@ -99,7 +100,7 @@ async def _transfer_cert_order(chunk, table):
                 AcceptanceUrl = Acceptance[-1].get('UrlSigned', '') if document.get(
                     'AcceptanceDocuments') else ''
 
-            old_item = table[0].row(row_key)
+            old_item = table.row(row_key)
             if old_item is None or old_item == {}:
                 IdentityId = str(document.get("IdentityId", ""))
                 Uid = document.get("Uid", "")
@@ -154,75 +155,76 @@ async def _transfer_cert_order(chunk, table):
                     address = ""
                 # Ghi vào HBase
                 data = {
-                    "info:identity_id": IdentityId,
-                    "info:uid": str(Uid).encode('utf-8'),
-                    "info:full_name": str(FullName).encode('utf-8'),
-                    "info:email": str(Email).encode('utf-8'),
-                    "info:phone": str(Phone).encode('utf-8'),
-                    "info:locality_code": str(LocalityCode).encode('utf-8'),
-                    "info:type": str(Type).encode('utf-8'),
-                    "info:type_desc": str(TypeDesc).encode('utf-8'),
-                    "info:status": str(Status).encode('utf-8'),
-                    "info:status_desc": str(StatusDesc).encode('utf-8'),
-                    "info:client_name": str(ClientName).encode('utf-8'),
-                    "info:client_id": str(ClientId).encode('utf-8'),
-                    "info:created_date": str(CreatedDate).encode('utf-8'),
-                    "info:updated_date": str(UpdatedDate).encode('utf-8'),
-                    "info:ma_tb": str(ma_tb).encode('utf-8'),
-                    "info:ma_gd": str(ma_gd).encode('utf-8'),
-                    "info:ma_kh": str(ma_kh).encode('utf-8'),
-                    "info:ma_hd": str(ma_hd).encode('utf-8'),
-                    "info:ma_hrm": str(ma_hrm).encode('utf-8'),
-                    "info:address": str(address).encode('utf-8'),
-                    "info:source": str(Source).encode('utf-8'),
-                    "info:request_cert_id": str(RequestCertId).encode('utf-8'),
-                    "info:serial": str(Serial).encode('utf-8'),
-                    "info:credential_id": str(CredentialId).encode('utf-8'),
-                    "info:pricing_code": str(PricingCode).encode('utf-8'),
-                    "info:pricing_name": str(PricingName).encode('utf-8'),
-                    "info:pricing_price": str(Price).encode('utf-8'),
-                    "info:code": str(Code).encode('utf-8'),
-                    "info:sign_type": str(SignType).encode('utf-8'),
-                    "info:validity": str(Validity).encode('utf-8'),
-                    "info:ma_gt": str(MaGt).encode('utf-8'),
-                    "info:previous_serial": str(PreviousSerial).encode('utf-8'),
-                    "info:contract_url": str(ContractUrl).encode('utf-8'),
-                    "info:acceptance_url": str(AcceptanceUrl).encode('utf-8'),
-                    "info:log_content": str(LogContent).encode('utf-8'),
-                    "info:log_created_date": str(LogCreatedDate).encode('utf-8'),
-
-                    "address:province_id": str(provinceId).encode('utf-8'),
-                    "address:province_name": str(provinceName).encode('utf-8'),
-                    "address:district_id": str(districtId).encode('utf-8'),
-                    "address:district_name": str(districtName).encode('utf-8'),
-                    "address:ward_id": str(wardId).encode('utf-8'),
-                    "address:ward_name": str(wardName).encode('utf-8'),
-                    "address:street_name": str(streetName).encode('utf-8'),
-                    "address:address_detail": str(address).encode('utf-8'),
+                    "INFO:IDENTITY_ID": IdentityId,
+                    "INFO:UID": str(Uid),
+                    "INFO:FULL_NAME": str(FullName).encode('utf-8'),
+                    "INFO:EMAIL": str(Email),
+                    "INFO:PHONE": str(Phone),
+                    "INFO:LOCALITY_CODE": str(LocalityCode),
+                    "INFO:TYPE": str(Type) if Type is not None else None,
+                    "INFO:TYPE_DESC": str(TypeDesc),
+                    "INFO:STATUS": str(Status) if Status is not None else None,
+                    "INFO:STATUS_DESC": str(StatusDesc),
+                    "INFO:CLIENT_NAME": str(ClientName).encode('utf-8'),
+                    "INFO:CLIENT_ID": str(ClientId),
+                    "INFO:CREATED_DATE": str(CreatedDate),
+                    "INFO:UPDATED_DATE": str(UpdatedDate) if UpdatedDate is not None else None,
+                    "INFO:MA_TB": str(ma_tb),
+                    "INFO:MA_GD": str(ma_gd),
+                    "INFO:MA_KH": str(ma_kh),
+                    "INFO:MA_HD": str(ma_hd),
+                    "INFO:MA_HRM": str(ma_hrm),
+                    "INFO:ADDRESS": str(address).encode('utf-8'),
+                    "INFO:SOURCE": str(Source) if Source is not None else None,
+                    "INFO:REQUEST_CERT_ID": str(RequestCertId),
+                    "INFO:SERIAL": str(Serial),
+                    "INFO:CREDENTIAL_ID": str(CredentialId),
+                    "INFO:PRICING_CODE": str(PricingCode),
+                    "INFO:PRICING_NAME": str(PricingName).encode('utf-8'),
+                    "INFO:PRICING_PRICE": str(Price),
+                    "INFO:CODE": str(Code),
+                    "INFO:SIGN_TYPE": str(SignType) if SignType is not None else None,
+                    "INFO:VALIDITY": str(Validity) if Validity is not None else None,
+                    "INFO:MA_GT": str(MaGt),
+                    "INFO:PREVIOUS_SERIAL": str(PreviousSerial),
+                    "INFO:CONTRACT_URL": str(ContractUrl).encode('utf-8'),
+                    "INFO:ACCEPTANCE_URL": str(AcceptanceUrl).encode('utf-8'),
+                    "INFO:LOG_CONTENT": str(LogContent).encode('utf-8'),
+                    "INFO:LOG_CREATED_DATE": str(LogCreatedDate) if LogCreatedDate is not None else None,
+                    "ADDRESS:PROVINCE_ID": str(provinceId) if provinceId is not None else None,
+                    "ADDRESS:PROVINCE_NAME": str(provinceName).encode('utf-8'),
+                    "ADDRESS:DISTRICT_ID": str(districtId) if districtId is not None else None,
+                    "ADDRESS:DISTRICT_NAME": str(districtName).encode('utf-8'),
+                    "ADDRESS:WARD_ID": str(wardId) if wardId is not None else None,
+                    "ADDRESS:WARD_NAME": str(wardName).encode('utf-8'),
+                    "ADDRESS:STREET_NAME": str(streetName).encode('utf-8'),
+                    "ADDRESS:ADDRESS_DETAIL": str(address).encode('utf-8'),
                 }
                 batch.put(row_key, data)
             else:
-                if _column_value_exists(table, row_key, "ìnfo", "status", Status):
-                    table[0].put(row_key, {'info:status': str(Status).encode('utf-8')})
-                if _column_value_exists(table, row_key, "ìnfo", "status_desc", StatusDesc):
-                    table[0].put(row_key, {'info:status_desc': str(StatusDesc).encode('utf-8')})
-                if _column_value_exists(table, row_key, "ìnfo", "updated_date", UpdatedDate):
-                    table[0].put(row_key, {'info:updated_date': str(UpdatedDate).encode('utf-8')})
-                if _column_value_exists(table, row_key, "ìnfo", "request_cert_id", RequestCertId):
-                    table[0].put(row_key, {'info:request_cert_id': str(RequestCertId).encode('utf-8')})
-                if _column_value_exists(table, row_key, "ìnfo", "credential_id", CredentialId):
-                    table[0].put(row_key, {'info:credential_id': str(CredentialId).encode('utf-8')})
-                if _column_value_exists(table, row_key, "ìnfo", "contract_url", ContractUrl):
-                    table[0].put(row_key, {'info:contract_url': str(ContractUrl).encode('utf-8')})
-                if _column_value_exists(table, row_key, "ìnfo", "acceptance_url", AcceptanceUrl):
-                    table[0].put(row_key, {'info:acceptance_url': str(AcceptanceUrl).encode('utf-8')})
-                if _column_value_exists(table, row_key, "ìnfo", "log_content", LogContent):
-                    table[0].put(row_key, {'info:log_content': str(LogContent).encode('utf-8')})
-                if _column_value_exists(table, row_key, "ìnfo", "log_created_date", LogCreatedDate):
-                    table[0].put(row_key, {'info:log_created_date': str(LogCreatedDate).encode('utf-8')})
-                if _column_value_exists(table, row_key, "ìnfo", "serial", Serial):
-                    table[0].put(row_key, {'info:serial': str(Serial).encode('utf-8')})
-            batch.send()
+                # Nếu bản ghi đã tồn tại, cập nhật một số trường thay đổi
+                if _column_value_exists(table, row_key, "INFO", "STATUS", Status):
+                    table.put(row_key, {"INFO:STATUS": str(Status) if Status is not None else None})
+                if _column_value_exists(table, row_key, "INFO", "STATUS_DESC", StatusDesc):
+                    table.put(row_key, {"INFO:STATUS_DESC": str(StatusDesc)})
+                if _column_value_exists(table, row_key, "INFO", "UPDATED_DATE", UpdatedDate):
+                    table.put(row_key, {"INFO:UPDATED_DATE": str(UpdatedDate) if UpdatedDate is not None else None})
+                if _column_value_exists(table, row_key, "INFO", "REQUEST_CERT_ID", RequestCertId):
+                    table.put(row_key, {"INFO:REQUEST_CERT_ID": str(RequestCertId)})
+                if _column_value_exists(table, row_key, "INFO", "CREDENTIAL_ID", CredentialId):
+                    table.put(row_key, {"INFO:CREDENTIAL_ID": str(CredentialId)})
+                if _column_value_exists(table, row_key, "INFO", "CONTRACT_URL", ContractUrl):
+                    table.put(row_key, {"INFO:CONTRACT_URL": str(ContractUrl).encode('utf-8')})
+                if _column_value_exists(table, row_key, "INFO", "ACCEPTANCE_URL", AcceptanceUrl):
+                    table.put(row_key, {"INFO:ACCEPTANCE_URL": str(AcceptanceUrl).encode('utf-8')})
+                if _column_value_exists(table, row_key, "INFO", "LOG_CONTENT", LogContent):
+                    table.put(row_key, {"INFO:LOG_CONTENT": str(LogContent).encode('utf-8')})
+                if _column_value_exists(table, row_key, "INFO", "LOG_CREATED_DATE", LogCreatedDate):
+                    table.put(row_key, {"INFO:LOG_CREATED_DATE": str(LogCreatedDate) if LogCreatedDate is not None else None})
+                if _column_value_exists(table, row_key, "INFO", "SERIAL", Serial):
+                    table.put(row_key, {"INFO:SERIAL": str(Serial)})
+
+        batch.send()
         logger.info(f"Batch với {len(chunk)} bản ghi đã được xử lý.")
     except Exception as e:
         logger.error(f"Lỗi trong quá trình xử lý batch: {e}")
@@ -230,7 +232,7 @@ async def _transfer_cert_order(chunk, table):
 
 
 async def load_user(node_name, start_date, end_date):
-    collection_register, table, hbase_connection, mongo_client = init_connect(config, node_name, "Register", ["user_info"])
+    collection_register, table, hbase_connection, mongo_client = init_connect(config, node_name, "Register", ["USER_INFO"])
     try:
         documents_register = collection_register.find({'$and': [
             {'$or': [{'createdDate': {'$gte': start_date}}, {'modifiedDate': {'gte': start_date}}]},
@@ -246,7 +248,7 @@ async def load_user(node_name, start_date, end_date):
         mongo_client.close()
     logger.info("Chuyển dữ liệu Register thành công từ MongoDB sang HBase.")
 
-    collection_user, table, hbase_connection, mongo_client = init_connect(config, node_name, "User", ["user_info"])
+    collection_user, table, hbase_connection, mongo_client = init_connect(config, node_name, "User", ["USER_INFO"])
     try:
         documents_user = collection_user.find({'$and': [
             {'$or': [{'createDate': {'$gte': start_date}}, {'modifiedDate': {'gte': start_date}}]},
@@ -264,7 +266,7 @@ async def load_user(node_name, start_date, end_date):
 
 
 async def load_personal_turn_order(node_name, start_date, end_date):
-    collection, table, hbase_connection, mongo_client = init_connect(config, node_name, "PersonalSignTurnOrder", ["personal_sign_turn_order"])
+    collection, table, hbase_connection, mongo_client = init_connect(config, node_name, "PersonalSignTurnOrder", ["PERSONAL_SIGN_TURN_ORDER"])
     try:
         documents = collection.find({'$and': [
             {'$or': [{'CreatedDate': {'$gte': start_date}}, {'UpdatedDate': {'gte': start_date}}]},
@@ -293,7 +295,7 @@ async def load_data_csc(start_date, end_date):
 
 
 async def load_credential(node_name, start_date, end_date):
-    collection, table, hbase_connection, mongo_client = init_connect(config, node_name, "Credential", ["credential", "credential_status_log"])
+    collection, table, hbase_connection, mongo_client = init_connect(config, node_name, "Credential", ["CREDENTIAL", "CREDENTIAL_STATUS_LOG"])
     try:
         documents = collection.find({'$and': [
             {'$or': [{'createdDate': {'$gte': start_date}}, {'modifiedDate': {'gte': start_date}}]},
@@ -312,7 +314,7 @@ async def load_credential(node_name, start_date, end_date):
 
 
 async def load_cert(node_name, start_date, end_date):
-    collection_request_cert, table, hbase_connection, mongo_client = init_connect(config, node_name, "RequestCert", ["cert"])
+    collection_request_cert, table, hbase_connection, mongo_client = init_connect(config, node_name, "RequestCert", ["CERT"])
     try:
         documents_request_cert = collection_request_cert.find({'$and': [
             {'$or': [{'createdDate': {'$gte': start_date}}, {'updatedTime': {'gte': start_date}}]},
@@ -329,7 +331,7 @@ async def load_cert(node_name, start_date, end_date):
     logger.info("Chuyển dữ liệu RequestCert thành công từ MongoDB sang HBase.")
 
     try:
-        collection_cert, table, hbase_connection, mongo_client = init_connect(config, node_name, "Cert", ["cert"])
+        collection_cert, table, hbase_connection, mongo_client = init_connect(config, node_name, "Cert", ["CERT"])
         documents_cert = collection_cert.find({'$and': [
             {'createDate': {'$gte': start_date}},
             {'createDate': {'$lt': end_date}}]},
@@ -383,7 +385,7 @@ async def load_signature_transaction(node_name, start_date, end_date):
         table_name = "SignatureTransaction"
         table_names = await _get_cut_off_name(node_name, table_name, start_date, end_date)
         for name in table_names:
-            collection, table, hbase_connection, mongo_client = init_connect(config, node_name, name, ["signature_transaction"])
+            collection, table, hbase_connection, mongo_client = init_connect(config, node_name, name, ["SIGNATURE_TRANSACTION"])
             documents = collection.find({'$and': [
                 {'reqTime': {'$gte': start_date}},
                 {'reqTime': {'$lt': end_date}}]},
@@ -453,53 +455,53 @@ async def _transfer_chunk_sync(chunk, table, collection_name):
         logger.error(f"Lỗi trong quá trình xử lý chunk: {e}")
 
 
-async def _transfer_signature_transaction(chunk, table):
+async def _transfer_signature_transaction(chunk, tables):
     try:
-        batch = table[0].batch()
+        table = tables[0]
+        batch = table.batch()
         for document in chunk:
             row_key = str(document["_id"])
-            credentialId = str(document.get("credentialId", "")).encode('utf-8')
-            serial = str(document.get("certSerial", "")).encode('utf-8')
-            identityId = str(document.get("identityId", "")).encode('utf-8')
-            uid = str(document.get("identityUid", "")).encode('utf-8')
+            credentialId = str(document.get("credentialId", ""))
+            serial = str(document.get("certSerial", ""))
+            identityId = str(document.get("identityId", ""))
+            uid = str(document.get("identityUid", ""))
             fullName = str(document.get("identityName", "")).encode('utf-8')
-            email = str(document.get("identityEmail", "")).encode('utf-8')
-            status = str(document.get("status", "")).encode('utf-8')
-            statusDesc = str(document.get("statusDesc", "")).encode('utf-8')
-            reqTime = str(int(document.get("reqTime", "").timestamp() * 1000)).encode('utf-8')
+            email = str(document.get("identityEmail", ""))
+            status = str(document.get("status", ""))
+            statusDesc = str(document.get("statusDesc", ""))
+            reqTime = str(int(document.get("reqTime", "").timestamp() * 1000))
             expiredTime = ""
             expireTime_check = document.get("expireTime", "")
             if expireTime_check is not None and expireTime_check != "" and expireTime_check != datetime(1, 1, 1, 0, 0):
-                expiredTime = str(int(expireTime_check.timestamp() * 1000)).encode('utf-8')
+                expiredTime = str(int(expireTime_check.timestamp() * 1000))
             finishDate = ""
             finishDate_check = document.get("finishDate", "")
             if finishDate_check is not None and finishDate_check != "" and finishDate_check != datetime(1, 1, 1, 0, 0):
-                finishDate = str(int(finishDate_check.timestamp() * 1000)).encode('utf-8')
-            tranTypeDesc = str(document.get("tranTypeDesc", "")).encode('utf-8')
-            tranType = str(document.get("tranType", "")).encode('utf-8')
-            executeTime = str(document.get("excuteTime", "")).encode('utf-8')
-            appId = str(document.get("appId", "")).encode('utf-8')
+                finishDate = str(int(finishDate_check.timestamp() * 1000))
+            tranTypeDesc = str(document.get("tranTypeDesc", ""))
+            tranType = str(document.get("tranType", ""))
+            executeTime = str(document.get("excuteTime", ""))
+            appId = str(document.get("appId", ""))
             appName = str(document.get("appName", "")).encode('utf-8')
-            tranCode = str(document.get("tranCode", "")).encode('utf-8')
+            tranCode = str(document.get("tranCode", ""))
             data = {
-                "info:serial": serial,
-                "info:credential_id": credentialId,
-                "info:identity_id": identityId,
-                "info:uid": uid,
-                "info:full_name": fullName,
-                "info:email": email,
-                "info:status": status,
-                "info:status_desc": statusDesc,
-                "info:req_time": reqTime,
-                "info:expired_time": expiredTime,
-                "info:finish_date": finishDate,
-                "info:tran_type_desc": tranTypeDesc,
-                "info:tran_type": tranType,
-                "info:execute_time": executeTime,
-                "info:app_id": appId,
-                "info:app_name": appName,
-                "info:tran_code": tranCode,
-
+                "INFO:SERIAL": serial,
+                "INFO:CREDENTIAL_ID": credentialId,
+                "INFO:IDENTITY_ID": identityId,
+                "INFO:UID": uid,
+                "INFO:FULL_NAME": fullName.encode('utf-8'),
+                "INFO:EMAIL": email,
+                "INFO:STATUS": str(status),
+                "INFO:STATUS_DESC": statusDesc,
+                "INFO:REQ_TIME": str(reqTime),
+                "INFO:EXPIRED_TIME": str(expiredTime),
+                "INFO:FINISH_DATE": str(finishDate),
+                "INFO:TRAN_TYPE_DESC": tranTypeDesc,
+                "INFO:TRAN_TYPE": str(tranType),
+                "INFO:EXECUTE_TIME": str(executeTime),
+                "INFO:APP_ID": appId,
+                "INFO:APP_NAME": appName.encode('utf-8'),
+                "INFO:TRAN_CODE": tranCode,
             }
             batch.put(row_key, data)
         batch.send()
@@ -509,9 +511,10 @@ async def _transfer_signature_transaction(chunk, table):
         traceback.print_exc()
 
 
-async def _transfer_register(chunk, table):
+async def _transfer_register(chunk, tables):
     try:
-        batch = table[0].batch()
+        table = tables[0]
+        batch = table.batch()
         for document in chunk:
             row_key = str(document["_id"])
             status = document.get("status", "")
@@ -520,7 +523,7 @@ async def _transfer_register(chunk, table):
             modifiedDate_check = document.get("modifiedDate", "")
             if modifiedDate_check is not None and modifiedDate_check != "" and modifiedDate_check != datetime(1, 1, 1, 0, 0):
                 modifiedDate = int(modifiedDate_check.timestamp() * 1000)
-            old_item = table[0].row(row_key)
+            old_item = table.row(row_key)
             if old_item is None or old_item == {}:
                 fullName = document.get("fullName", "").encode('utf-8')
                 email = document.get("email", "")
@@ -546,29 +549,29 @@ async def _transfer_register(chunk, table):
                     address = ""
 
                 # Ghi vào HBase
-                table[0].put(row_key, {
-                    "register:full_name": fullName,
-                    "register:uid": str(uid).encode('utf-8'),
-                    "register:phone": str(phone).encode('utf-8'),
-                    "register:email": str(email).encode('utf-8'),
-                    "register:status": str(status).encode('utf-8'),
-                    "register:status_desc": str(statusDesc).encode('utf-8'),
-                    "register:create_date": str(createDate).encode('utf-8'),
-                    "register:modified_date": str(modifiedDate).encode('utf-8'),
-                    "register:source": str(source).encode('utf-8'),
-                    "register:province_id": str(provinceId).encode('utf-8'),
-                    "register:district_id": str(districtId).encode('utf-8'),
-                    "register:ward_id": str(wardId).encode('utf-8'),
-                    "register:street_name": str(streetName).encode('utf-8'),
-                    "register:address": str(address)
+                table.put(row_key, {
+                    "REGISTER:FULL_NAME": fullName,
+                    "REGISTER:UID": str(uid),
+                    "REGISTER:PHONE": str(phone),
+                    "REGISTER:EMAIL": str(email),
+                    "REGISTER:STATUS": str(status),
+                    "REGISTER:STATUS_DESC": str(statusDesc),
+                    "REGISTER:CREATE_DATE": str(createDate),
+                    "REGISTER:MODIFIED_DATE": str(modifiedDate),
+                    "REGISTER:SOURCE": str(source),
+                    "REGISTER:PROVINCE_ID": str(provinceId),
+                    "REGISTER:DISTRICT_ID": str(districtId),
+                    "REGISTER:WARD_ID": str(wardId),
+                    "REGISTER:STREET_NAME": str(streetName).encode('utf-8'),
+                    "REGISTER:ADDRESS": str(address)
                 })
             else:
-                if _column_value_exists(table, row_key, "register", "status", status):
-                    table[0].put(row_key, {'register:status': str(status).encode('utf-8')})
-                if _column_value_exists(table, row_key, "register", "status_desc", statusDesc):
-                    table[0].put(row_key, {'register:status_desc': str(statusDesc).encode('utf-8')})
-                if _column_value_exists(table, row_key, "register", "modified_date", modifiedDate):
-                    table[0].put(row_key, {'register:modified_date': str(modifiedDate).encode('utf-8')})
+                if _column_value_exists(table, row_key, "REGISTER", "STATUS", status):
+                    table.put(row_key, {'REGISTER:STATUS': str(status)})
+                if _column_value_exists(table, row_key, "REGISTER", "STATUS_DESC", statusDesc):
+                    table.put(row_key, {'REGISTER:STATUS_DESC': str(statusDesc)})
+                if _column_value_exists(table, row_key, "REGISTER", "MODIFIED_DATE", modifiedDate):
+                    table.put(row_key, {'REGISTER:MODIFIED_DATE': str(modifiedDate)})
         batch.send()
         logger.info(f"Batch với {len(chunk)} bản ghi đã được xử lý.")
     except Exception as e:
@@ -576,9 +579,10 @@ async def _transfer_register(chunk, table):
         traceback.print_exc()
 
 
-async def _transfer_user(chunk, table):
+async def _transfer_user(chunk, tables):
     try:
-        batch = table[0].batch()
+        table = tables[0]
+        batch = table.batch()
         for document in chunk:
             row_key = str(document["_id"])
             status = document.get("status", "")
@@ -594,7 +598,7 @@ async def _transfer_user(chunk, table):
             roles = ", ".join(doc.get('name', '') for doc in role if isinstance(doc, dict))
             preStatus = document.get("preStatus", "")
 
-            old_item = table[0].row(row_key)
+            old_item = table.row(row_key)
             if old_item is None or old_item == {}:
                 uid = document.get("uid", "")
                 username = document.get("username", "")
@@ -632,52 +636,53 @@ async def _transfer_user(chunk, table):
                     address = ""
 
                 # Ghi vào HBase
-                table[0].put(row_key, {
-                    "info:uid": str(uid).encode('utf-8'),
-                    "info:username": str(username).encode('utf-8'),
-                    "info:full_name": fullName,
-                    "info:phone": str(phone).encode('utf-8'),
-                    "info:email": str(email).encode('utf-8'),
-                    "info:locality_code": str(localityId).encode('utf-8'),
-                    "info:uid_prefix": str(uidPrefix).encode('utf-8'),
-                    "info:user_group_id": str(userGroupId).encode('utf-8'),
-                    "info:status": str(status).encode('utf-8'),
-                    "info:status_desc": str(statusDesc).encode('utf-8'),
-                    "info:create_date": str(createDate).encode('utf-8'),
-                    "info:modified_date": str(modifiedDate).encode('utf-8'),
-                    "info:account_type": str(accountType).encode('utf-8'),
-                    "info:account_type_desc": str(accountTypeDesc).encode('utf-8'),
-                    "info:is_com_admin": str(isComAdmin).encode('utf-8'),
-                    "info:is_test": str(isTest).encode('utf-8'),
-                    "info:pre_status": str(preStatus).encode('utf-8'),
-                    "info:province_code": str(provinceCode).encode('utf-8'),
-                    "info:province_codes": str(provinceCode_str),
-                    "info:source": str(source).encode('utf-8'),
-                    "info:province_id": str(provinceId).encode('utf-8'),
-                    "info:province_name": str(provinceName).encode('utf-8'),
-                    "info:district_id": str(districtId).encode('utf-8'),
-                    "info:district_name": str(districtName),
-                    "info:ward_id": str(wardId).encode('utf-8'),
-                    "info:ward_name": str(wardName).encode('utf-8'),
-                    "info:street_name": str(streetName).encode('utf-8'),
-                    "info:address": str(address),
-                    "info:roles": str(roles)
+                table.put(row_key, {
+                    "INFO:UID": str(uid),
+                    "INFO:USERNAME": str(username),
+                    "INFO:FULL_NAME": fullName.encode('utf-8'),
+                    "INFO:PHONE": str(phone),
+                    "INFO:EMAIL": str(email),
+                    "INFO:LOCALITY_CODE": str(localityId),
+                    "INFO:UID_PREFIX": str(uidPrefix),
+                    "INFO:USER_GROUP_ID": str(userGroupId),
+                    "INFO:STATUS": str(status),
+                    "INFO:STATUS_DESC": str(statusDesc),
+                    "INFO:CREATE_DATE": str(createDate),
+                    "INFO:MODIFIED_DATE": str(modifiedDate),
+                    "INFO:ACCOUNT_TYPE": str(accountType),
+                    "INFO:ACCOUNT_TYPE_DESC": str(accountTypeDesc),
+                    "INFO:IS_COM_ADMIN": str(isComAdmin),
+                    "INFO:IS_TEST": str(isTest),
+                    "INFO:PRE_STATUS": str(preStatus),
+                    "INFO:PROVINCE_CODE": str(provinceCode),
+                    "INFO:PROVINCE_CODES": str(provinceCode_str),
+                    "INFO:SOURCE": str(source),
+                    "INFO:PROVINCE_ID": str(provinceId),
+                    "INFO:PROVINCE_NAME": str(provinceName).encode('utf-8'),
+                    "INFO:DISTRICT_ID": str(districtId),
+                    "INFO:DISTRICT_NAME": str(districtName).encode('utf-8'),
+                    "INFO:WARD_ID": str(wardId),
+                    "INFO:WARD_NAME": str(wardName).encode('utf-8'),
+                    "INFO:STREET_NAME": str(streetName).encode('utf-8'),
+                    "INFO:ADDRESS": str(address).encode('utf-8'),
+                    "INFO:ROLES": str(roles)
                 })
             else:
-                if _column_value_exists(table, row_key, "ìnfo", "status", status):
-                    table[0].put(row_key, {'info:status': str(status).encode('utf-8')})
-                if _column_value_exists(table, row_key, "ìnfo", "status_desc", statusDesc):
-                    table[0].put(row_key, {'info:status_desc': str(statusDesc).encode('utf-8')})
-                if _column_value_exists(table, row_key, "ìnfo", "modified_date", modifiedDate):
-                    table[0].put(row_key, {'info:modified_date': str(modifiedDate).encode('utf-8')})
-                if _column_value_exists(table, row_key, "ìnfo", "province_code", provinceCode):
-                    table[0].put(row_key, {'info:province_code': str(provinceCode).encode('utf-8')})
-                if _column_value_exists(table, row_key, "ìnfo", "province_codes", provinceCodes):
-                    table[0].put(row_key, {'info:province_codes': str(provinceCode_str).encode('utf-8')})
-                if _column_value_exists(table, row_key, "ìnfo", "roles", roles):
-                    table[0].put(row_key, {'info:roles': str(roles).encode('utf-8')})
-                if _column_value_exists(table, row_key, "ìnfo", "pre_status", preStatus):
-                    table[0].put(row_key, {'info:pre_status': str(preStatus).encode('utf-8')})
+                if _column_value_exists(table, row_key, "ÌNFO", "STATUS", status):
+                    table.put(row_key, {'INFO:STATUS': str(status)})
+                if _column_value_exists(table, row_key, "ÌNFO", "STATUS_DESC", statusDesc):
+                    table.put(row_key, {'INFO:STATUS_DESC': str(statusDesc)})
+                if _column_value_exists(table, row_key, "ÌNFO", "MODIFIED_DATE", modifiedDate):
+                    table.put(row_key, {'INFO:MODIFIED_DATE': str(modifiedDate)})
+                if _column_value_exists(table, row_key, "ÌNFO", "PROVINCE_CODE", provinceCode):
+                    table.put(row_key, {'INFO:PROVINCE_CODE': str(provinceCode)})
+                if _column_value_exists(table, row_key, "ÌNFO", "PROVINCE_CODES", provinceCodes):
+                    table.put(row_key, {'INFO:PROVINCE_CODES': str(provinceCode_str)})
+                if _column_value_exists(table, row_key, "ÌNFO", "ROLES", roles):
+                    table.put(row_key, {'INFO:ROLES': str(roles)})
+                if _column_value_exists(table, row_key, "ÌNFO", "PRE_STATUS", preStatus):
+                    table.put(row_key, {'INFO:PRE_STATUS': str(preStatus)})
+
         batch.send()
         logger.info(f"Batch với {len(chunk)} bản ghi đã được xử lý.")
     except Exception as e:
@@ -685,47 +690,43 @@ async def _transfer_user(chunk, table):
         traceback.print_exc()
 
 
-async def _transfer_personal_sign_turn_order(chunk, table):
+async def _transfer_personal_sign_turn_order(chunk, tables):
     try:
-        batch = table[0].batch()
+        table = tables[0]
+        batch = table.batch()
         for document in chunk:
             row_key = str(document["_id"])
 
-            Status = document.get("Status", None)
+            Status = document.get("Status", "")
             StatusDesc = document.get("StatusDesc", "")
-            UpdatedDate = None
-            UpdatedDate_check = document.get("UpdatedDate", None)
-            if UpdatedDate_check:
-                UpdatedDate = int(UpdatedDate_check.timestamp() * 1000)  # Chuyển thành mili giây
-
-            PaymentStatus = document.get("PaymentStatus", None)
-            PaymentStatusDesc = document.get("PaymentStatusDesc", "")
-            TotalMoney = document.get("TotalMoney", None)
-            if TotalMoney is not None:
-                TotalMoney = str(TotalMoney)  # Chuyển Decimal về chuỗi
-
+            UpdatedDate = ""
+            UpdatedDate_check = document.get("UpdatedDate", "")
+            if UpdatedDate_check is not None and UpdatedDate_check != "" and UpdatedDate_check != datetime(1, 1, 1, 0, 0):
+                UpdatedDate = int(UpdatedDate_check.timestamp() * 1000)
+            PaymentStatus = document.get("PaymentStatus", "")
+            PaymentStatusDesc = document.get("PaymentStatuDesc", "")
+            TotalMoney = document.get("TotalMoney", "")
             Pricings = document.get('Pricings', [])
-            if Pricings:
+            if Pricings is not None and Pricings != []:
                 Pricing = Pricings[-1]
                 PricingName = Pricing.get("Name", "")
                 PricingCode = Pricing.get("tocdo_id", "")
                 Code = Pricing.get("Code", "")
-                SignTurnNumber = Pricing.get("SignTurnNumber", 0)
+                SignTurnNumber = Pricing.get("SignTurnNumber", "")
             else:
                 PricingName = ""
                 PricingCode = ""
                 Code = ""
                 SignTurnNumber = 0
 
-            old_item = table[0].row(row_key)
+            old_item = table.row(row_key)
             if old_item is None or old_item == {}:
                 Indentity = document.get('UserInfo', {})
                 IdentityId = Indentity.get('_id', '')
                 Uid = Indentity.get("Uid", "")
                 FullName = Indentity.get("FullName", "")
                 LocalityCode = Indentity.get("LocalityCode", "")
-                CreatedDate = int(document.get("CreatedDate", "").timestamp() * 1000) if document.get("CreatedDate") else None
-
+                CreatedDate = int(document.get("CreatedDate", "").timestamp() * 1000)
                 DHSXKDCustomerInfo = document.get("DHSXKDCustomerInfo", {})
                 ma_tb = DHSXKDCustomerInfo.get("ma_tb", "")
                 ma_gd = DHSXKDCustomerInfo.get("ma_gd", "")
@@ -735,58 +736,59 @@ async def _transfer_personal_sign_turn_order(chunk, table):
 
                 CredentialId = document.get("CredentialId", "")
                 PaymentOrderId = document.get("PaymentOrderId", "")
-                IsSyncDHSXKD = document.get("IsSyncDHSXKD", False)  # Boolean, kiểm tra nếu không có thì mặc định False
+                IsSyncDHSXKD = document.get("IsSyncDHSXKD", "")
                 MaGt = document.get("MaGt", "")
 
                 # Ghi vào HBase
-                table[0].put(row_key, {
-                    "info:identity_id": str(IdentityId).encode('utf-8'),
-                    "info:uid": str(Uid).encode('utf-8'),
-                    "info:full_name": str(FullName).encode('utf-8'),
-                    "info:locality_code": str(LocalityCode).encode('utf-8'),
-                    "info:status": str(Status).encode('utf-8') if Status is not None else b"",
-                    "info:status_desc": str(StatusDesc).encode('utf-8'),
-                    "info:created_date": str(CreatedDate).encode('utf-8') if CreatedDate else b"",
-                    "info:updated_date": str(UpdatedDate).encode('utf-8') if UpdatedDate else b"",
-                    "info:ma_tb": str(ma_tb).encode('utf-8'),
-                    "info:ma_gd": str(ma_gd).encode('utf-8'),
-                    "info:ma_kh": str(ma_kh).encode('utf-8'),
-                    "info:ma_hd": str(ma_hd).encode('utf-8'),
-                    "info:ma_hrm": str(ma_hrm).encode('utf-8'),
-                    "info:credential_id": str(CredentialId).encode('utf-8'),
-                    "info:payment_order_id": str(PaymentOrderId).encode('utf-8'),
-                    "info:payment_status": str(PaymentStatus).encode('utf-8') if PaymentStatus is not None else b"",
-                    "info:payment_status_desc": str(PaymentStatusDesc).encode('utf-8'),
-                    "info:is_sync_dhsxkd": str(IsSyncDHSXKD).encode('utf-8'),
-                    "info:ma_gt": str(MaGt).encode('utf-8'),
-                    "info:pricing_name": str(PricingName).encode('utf-8'),
-                    "info:pricing_code": str(PricingCode).encode('utf-8'),
-                    "info:code": str(Code).encode('utf-8'),
-                    "info:sign_turn_number": str(SignTurnNumber).encode('utf-8'),
-                    "info:total_money": str(TotalMoney).encode('utf-8') if TotalMoney is not None else b""
+                table.put(row_key, {
+                    "INFO:IDENTITY_ID": str(IdentityId),
+                    "INFO:UID": str(Uid),
+                    "INFO:FULL_NAME": str(FullName).encode('utf-8'),
+                    "INFO:LOCALITY_CODE": str(LocalityCode),
+                    "INFO:STATUS": str(Status) if Status is not None else b"",
+                    "INFO:STATUS_DESC": str(StatusDesc),
+                    "INFO:CREATED_DATE": str(CreatedDate) if CreatedDate else b"",
+                    "INFO:UPDATED_DATE": str(UpdatedDate) if UpdatedDate else b"",
+                    "INFO:MA_TB": str(ma_tb),
+                    "INFO:MA_GD": str(ma_gd),
+                    "INFO:MA_KH": str(ma_kh),
+                    "INFO:MA_HD": str(ma_hd),
+                    "INFO:MA_HRM": str(ma_hrm),
+                    "INFO:CREDENTIAL_ID": str(CredentialId),
+                    "INFO:PAYMENT_ORDER_ID": str(PaymentOrderId),
+                    "INFO:PAYMENT_STATUS": str(PaymentStatus) if PaymentStatus is not None else b"",
+                    "INFO:PAYMENT_STATUS_DESC": str(PaymentStatusDesc),
+                    "INFO:IS_SYNC_DHSXKD": str(IsSyncDHSXKD),
+                    "INFO:MA_GT": str(MaGt),
+                    "INFO:PRICING_NAME": str(PricingName).encode('utf-8'),
+                    "INFO:PRICING_CODE": str(PricingCode),
+                    "INFO:CODE": str(Code),
+                    "INFO:SIGN_TURN_NUMBER": str(SignTurnNumber),
+                    "INFO:TOTAL_MONEY": str(TotalMoney) if TotalMoney is not None else b""
                 })
             else:
                 # Cập nhật các trường nếu có thay đổi
-                if _column_value_exists(table, row_key, "info", "status", Status):
-                    table[0].put(row_key, {'info:status': str(Status).encode('utf-8')})
-                if _column_value_exists(table, row_key, "info", "status_desc", StatusDesc):
-                    table[0].put(row_key, {'info:status_desc': str(StatusDesc).encode('utf-8')})
-                if _column_value_exists(table, row_key, "info", "updated_date", UpdatedDate):
-                    table[0].put(row_key, {'info:updated_date': str(UpdatedDate).encode('utf-8')})
-                if _column_value_exists(table, row_key, "info", "payment_status", PaymentStatus):
-                    table[0].put(row_key, {'info:payment_status': str(PaymentStatus).encode('utf-8')})
-                if _column_value_exists(table, row_key, "info", "payment_status_desc", PaymentStatusDesc):
-                    table[0].put(row_key, {'info:payment_status_desc': str(PaymentStatusDesc).encode('utf-8')})
-                if _column_value_exists(table, row_key, "info", "pricing_name", PricingName):
-                    table[0].put(row_key, {'info:pricing_name': str(PricingName).encode('utf-8')})
-                if _column_value_exists(table, row_key, "info", "pricing_code", PricingCode):
-                    table[0].put(row_key, {'info:pricing_code': str(PricingCode).encode('utf-8')})
-                if _column_value_exists(table, row_key, "info", "code", Code):
-                    table[0].put(row_key, {'info:code': str(Code).encode('utf-8')})
-                if _column_value_exists(table, row_key, "info", "sign_turn_number", SignTurnNumber):
-                    table[0].put(row_key, {'info:sign_turn_number': str(SignTurnNumber).encode('utf-8')})
-                if _column_value_exists(table, row_key, "info", "total_money", TotalMoney):
-                    table[0].put(row_key, {'info:total_money': str(TotalMoney).encode('utf-8')})
+                if _column_value_exists(table, row_key, "INFO", "STATUS", Status):
+                    table.put(row_key, {'INFO:STATUS': str(Status)})
+                if _column_value_exists(table, row_key, "INFO", "STATUS_DESC", StatusDesc):
+                    table.put(row_key, {'INFO:STATUS_DESC': str(StatusDesc)})
+                if _column_value_exists(table, row_key, "INFO", "UPDATED_DATE", UpdatedDate):
+                    table.put(row_key, {'INFO:UPDATED_DATE': str(UpdatedDate)})
+                if _column_value_exists(table, row_key, "INFO", "PAYMENT_STATUS", PaymentStatus):
+                    table.put(row_key, {'INFO:PAYMENT_STATUS': str(PaymentStatus)})
+                if _column_value_exists(table, row_key, "INFO", "PAYMENT_STATUS_DESC", PaymentStatusDesc):
+                    table.put(row_key, {'INFO:PAYMENT_STATUS_DESC': str(PaymentStatusDesc)})
+                if _column_value_exists(table, row_key, "INFO", "PRICING_NAME", PricingName):
+                    table.put(row_key, {'INFO:PRICING_NAME': str(PricingName).encode('utf-8')})
+                if _column_value_exists(table, row_key, "INFO", "PRICING_CODE", PricingCode):
+                    table.put(row_key, {'INFO:PRICING_CODE': str(PricingCode)})
+                if _column_value_exists(table, row_key, "INFO", "CODE", Code):
+                    table.put(row_key, {'INFO:CODE': str(Code)})
+                if _column_value_exists(table, row_key, "INFO", "SIGN_TURN_NUMBER", SignTurnNumber):
+                    table.put(row_key, {'INFO:SIGN_TURN_NUMBER': str(SignTurnNumber)})
+                if _column_value_exists(table, row_key, "INFO", "TOTAL_MONEY", TotalMoney):
+                    table.put(row_key, {'INFO:TOTAL_MONEY': str(TotalMoney)})
+
         batch.send()
         logger.info(f"Batch với {len(chunk)} bản ghi đã được xử lý.")
     except Exception as e:
@@ -794,30 +796,31 @@ async def _transfer_personal_sign_turn_order(chunk, table):
         traceback.print_exc()
 
 
-async def _transfer_request_cert(chunk, table):
+async def _transfer_request_cert(chunk, tables):
     keyword = "OPER"
     try:
-        batch = table[0].batch()
+        table = tables[0]
+        batch = table.batch()
         for document in chunk:
-            row_key = str(document["_id"]).encode('utf-8')
-            status = str(document.get("status", "")).encode('utf-8')
-            statusDesc = str(document.get("statusDesc", "")).encode('utf-8')
+            row_key = str(document["_id"])
+            status = str(document.get("status", ""))
+            statusDesc = str(document.get("statusDesc", ""))
             updatedTime = ""
             updatedTime_check = document.get("updatedTime", "")
             if updatedTime_check is not None and updatedTime_check != "" and updatedTime_check != datetime(1, 1, 1, 0, 0):
-                updatedTime = str(int(updatedTime_check.timestamp() * 1000)).encode('utf-8')
+                updatedTime = str(int(updatedTime_check.timestamp() * 1000))
             approveTime = ""
             approveTime_check = document.get("approveTime", "")
             if approveTime_check is not None and approveTime_check != "" and approveTime_check != datetime(1, 1, 1, 0, 0):
-                approveTime = str(int(approveTime_check.timestamp() * 1000)).encode('utf-8')
-            old_item = table[0].row(row_key)
+                approveTime = str(int(approveTime_check.timestamp() * 1000))
+            old_item = table.row(row_key)
             if old_item is None or old_item == {}:
-                credentialId = str(document.get("credentialId", "")).encode('utf-8')
+                credentialId = str(document.get("credentialId", ""))
 
-                clientId = str(document.get("createdByClientId", "")).encode('utf-8')
+                clientId = str(document.get("createdByClientId", ""))
                 clientName = str(document.get("createdByClientName", "")).encode('utf-8')
-                createdDate = str(int(document.get("createdDate", "").timestamp() * 1000)).encode('utf-8')
-                pricingCode = str(document.get("pricingCode", "")).encode('utf-8')
+                createdDate = str(int(document.get("createdDate", "").timestamp() * 1000))
+                pricingCode = str(document.get("pricingCode", ""))
                 pricingName = str(document.get("pricingName", "")).encode('utf-8')
                 username = str(document.get("username", ""))
                 localityCode = ""
@@ -827,44 +830,45 @@ async def _transfer_request_cert(chunk, table):
                         localityCode = username[index:3]
                     else:
                         localityCode = localityCode[3:3]
-                uid = str(document.get("uid", "")).encode('utf-8')
-                identityId = str(document.get("identityId", "")).encode('utf-8')
+                uid = str(document.get("uid", ""))
+                identityId = str(document.get("identityId", ""))
                 fullName = str(document.get("fullName", "")).encode('utf-8')
-                period = str(document.get("period", "")).encode('utf-8')
-                code = str(document.get("code", "")).encode('utf-8')
-                requestType = str(document.get("requestType", "")).encode('utf-8')
-                requestTypeDesc = str(document.get("requestTypeDesc", "")).encode('utf-8')
+                period = str(document.get("period", ""))
+                code = str(document.get("code", ""))
+                requestType = str(document.get("requestType", ""))
+                requestTypeDesc = str(document.get("requestTypeDesc", ""))
                 # Ghi vào HBase
-                table[0].put(row_key, {
-                    "info:credential_id": credentialId,
-                    "info:status": status,
-                    "info:status_desc": statusDesc,
-                    "info:client_id": clientId,
-                    "info:client_name": clientName,
-                    "info:updated_time": updatedTime,
-                    "info:created_date": createdDate,
-                    "info:pricing_code": pricingCode,
-                    "info:pricing_name": pricingName,
-                    "info:username": username,
-                    "info:locality_code": localityCode,
-                    "info:uid": uid,
-                    "info:identity_id": identityId,
-                    "info:full_name": fullName,
-                    "info:period": period,
-                    "info:code": code,
-                    "info:approve_time": approveTime,
-                    "info:request_type": requestType,
-                    "info:request_type_desc": requestTypeDesc
+                table.put(row_key, {
+                    "INFO:CREDENTIAL_ID": credentialId,
+                    "INFO:STATUS": status,
+                    "INFO:STATUS_DESC": statusDesc,
+                    "INFO:CLIENT_ID": clientId,
+                    "INFO:CLIENT_NAME": clientName,
+                    "INFO:UPDATED_TIME": updatedTime,
+                    "INFO:CREATED_DATE": createdDate,
+                    "INFO:PRICING_CODE": pricingCode,
+                    "INFO:PRICING_NAME": pricingName,
+                    "INFO:USERNAME": username,
+                    "INFO:LOCALITY_CODE": localityCode,
+                    "INFO:UID": uid,
+                    "INFO:IDENTITY_ID": identityId,
+                    "INFO:FULL_NAME": fullName,
+                    "INFO:PERIOD": period,
+                    "INFO:CODE": code,
+                    "INFO:APPROVE_TIME": approveTime,
+                    "INFO:REQUEST_TYPE": requestType,
+                    "INFO:REQUEST_TYPE_DESC": requestTypeDesc
                 })
             else:
-                if _column_value_exists(table, row_key, "ìnfo", "status", status):
-                    table[0].put(row_key, {'info:status': status})
-                if _column_value_exists(table, row_key, "ìnfo", "status_desc", statusDesc):
-                    table[0].put(row_key, {'info:status_desc': statusDesc})
-                if _column_value_exists(table, row_key, "ìnfo", "updated_time", updatedTime):
-                    table[0].put(row_key, {'info:updated_time': updatedTime})
-                if _column_value_exists(table, row_key, "ìnfo", "approve_time", approveTime):
-                    table[0].put(row_key, {'info:approve_time': approveTime})
+                if _column_value_exists(table, row_key, "INFO", "STATUS", status):
+                    table.put(row_key, {'INFO:STATUS': status})
+                if _column_value_exists(table, row_key, "INFO", "STATUS_DESC", statusDesc):
+                    table.put(row_key, {'INFO:STATUS_DESC': statusDesc})
+                if _column_value_exists(table, row_key, "INFO", "UPDATED_TIME", updatedTime):
+                    table.put(row_key, {'INFO:UPDATED_TIME': updatedTime})
+                if _column_value_exists(table, row_key, "INFO", "APPROVE_TIME", approveTime):
+                    table.put(row_key, {'INFO:APPROVE_TIME': approveTime})
+
         batch.send()
         logger.info(f"Batch với {len(chunk)} bản ghi đã được xử lý.")
     except Exception as e:
@@ -872,27 +876,28 @@ async def _transfer_request_cert(chunk, table):
         traceback.print_exc()
 
 
-async def _transfer_cert(chunk, table):
+async def _transfer_cert(chunk, tables):
     try:
-        batch = table[0].batch()
+        table = tables[0]
+        batch = table.batch()
         for document in chunk:
             row_key = str(document["requestId"])
-            serial = str(document.get("serial", "")).encode('utf-8')
-            status = str(document.get("status", "")).encode('utf-8')
-            statusDesc = str(document.get("statusDesc", "")).encode('utf-8')
-            subject = str(document.get("subject", "")).encode('utf-8')
+            serial = str(document.get("serial", ""))
+            status = str(document.get("status", ""))
+            statusDesc = str(document.get("statusDesc", ""))
+            subject = str(document.get("subject", ""))
             validFrom = str(int(document.get("validFrom", "").timestamp() * 1000))
             validTo = str(int(document.get("validTo", "").timestamp() * 1000))
             createdDate = str(int(document.get("createDate", "").timestamp() * 1000))
             # Ghi vào HBase
-            table[0].put(row_key, {
-                "info:cert_status": status,
-                "info:cert_status_desc": statusDesc,
-                "info:serial": serial,
-                "info:subject": subject,
-                "info:valid_from": validFrom,
-                "info:valid_to": validTo,
-                "info:cert_created_date": createdDate,
+            table.put(row_key, {
+                "INFO:CERT_STATUS": status,
+                "INFO:CERT_STATUS_DESC": statusDesc,
+                "INFO:SERIAL": serial,
+                "INFO:SUBJECT": subject,
+                "INFO:VALID_FROM": validFrom,
+                "INFO:VALID_TO": validTo,
+                "INFO:CERT_CREATED_DATE": createdDate,
             })
         batch.send()
         logger.info(f"Batch với {len(chunk)} bản ghi đã được xử lý.")
@@ -901,10 +906,12 @@ async def _transfer_cert(chunk, table):
         traceback.print_exc()
 
 
-async def _transfer_credential(chunk, table):
+async def _transfer_credential(chunk, tables):
     try:
-        batch_credential = table[0].batch()
-        batch_log = table[1].batch()
+        table_credential = tables[0]
+        table_log = tables[1]
+        batch_credential = table_credential.batch()
+        batch_log = table_log.batch()
         keyword = "OPER"
         pricing_ps0 = {
             "Chứng thư số cá nhân trên các ứng dụng",
@@ -958,7 +965,7 @@ async def _transfer_credential(chunk, table):
                 certStatusDesc = ""
 
             # Kiểm tra record đã tồn tại trong bảng credential hay chưa
-            old_item = table[0].row(row_key)
+            old_item = table_credential.row(row_key)
             if old_item is None or old_item == {}:
 
                 createdDate = int(document.get("createdDate", "").timestamp() * 1000)
@@ -989,59 +996,60 @@ async def _transfer_credential(chunk, table):
                 serviceType = document.get("contract", "").get("serviceType", "")
 
                 # Ghi vào HBase
-                table[0].put(row_key, {
-                    "info:subject_dn": str(subjectDN).encode('utf-8'),
-                    "info:status": str(status).encode('utf-8'),
-                    "info:status_desc": str(statusDesc).encode('utf-8'),
-                    "info:created_date": str(createdDate).encode('utf-8'),
-                    "info:modified_date": str(modifiedDate).encode('utf-8'),
-                    "info:identity_id": str(identityId).encode('utf-8'),
-                    "info:full_name": str(fullName).encode('utf-8'),
-                    "info:username": str(username).encode('utf-8'),
-                    "info:email": str(email).encode('utf-8'),
-                    "info:phone": str(phone).encode('utf-8'),
-                    "info:uid": str(uid).encode('utf-8'),
-                    "info:client_id": str(clientId).encode('utf-8'),
-                    "info:client_name": str(clientName).encode('utf-8'),
-                    "info:locality_code": str(localityCode).encode('utf-8'),
-                    "info:ma_tb": str(ma_tb).encode('utf-8'),
-                    "info:source": str(source).encode('utf-8'),
+                table_credential.put(row_key, {
+                    "INFO:SUBJECT_DN": str(subjectDN).encode('utf-8'),
+                    "INFO:STATUS": str(status),
+                    "INFO:STATUS_DESC": str(statusDesc),
+                    "INFO:CREATED_DATE": str(createdDate),
+                    "INFO:MODIFIED_DATE": str(modifiedDate),
+                    "INFO:IDENTITY_ID": str(identityId),
+                    "INFO:FULL_NAME": str(fullName).encode('utf-8'),
+                    "INFO:USERNAME": str(username),
+                    "INFO:EMAIL": str(email),
+                    "INFO:PHONE": str(phone),
+                    "INFO:UID": str(uid),
+                    "INFO:CLIENT_ID": str(clientId),
+                    "INFO:CLIENT_NAME": str(clientName).encode('utf-8'),
+                    "INFO:LOCALITY_CODE": str(localityCode),
+                    "INFO:MA_TB": str(ma_tb),
+                    "INFO:SOURCE": str(source),
 
-                    "info:contract_number": str(contractNumber).encode('utf-8'),
-                    "info:pricing_name": str(pricingName).encode('utf-8'),
-                    "info:validity": str(validity).encode('utf-8'),
-                    "info:pricing_code": str(pricingCode).encode('utf-8'),
-                    "info:service_type": str(serviceType).encode('utf-8'),
+                    "INFO:CONTRACT_NUMBER": str(contractNumber),
+                    "INFO:PRICING_NAME": str(pricingName).encode('utf-8'),
+                    "INFO:VALIDITY": str(validity),
+                    "INFO:PRICING_CODE": str(pricingCode),
+                    "INFO:SERVICE_TYPE": str(serviceType),
 
-                    "info:serial": str(serial).encode('utf-8'),
-                    "info:valid_from": str(validFrom).encode('utf-8'),
-                    "info:valid_to": str(validTo).encode('utf-8'),
-                    "info:request_cert_id": str(requestCertId).encode('utf-8'),
-                    "info:cert_status": str(certStatus).encode('utf-8'),
-                    "info:cert_status_desc": str(certStatusDesc).encode('utf-8'),
-                    f'status_log:{date_str}': str(status).encode('utf-8')
+                    "INFO:SERIAL": str(serial),
+                    "INFO:VALID_FROM": str(validFrom),
+                    "INFO:VALID_TO": str(validTo),
+                    "INFO:REQUEST_CERT_ID": str(requestCertId),
+                    "INFO:CERT_STATUS": str(certStatus),
+                    "INFO:CERT_STATUS_DESC": str(certStatusDesc)
                 })
 
             else:
-                if _column_value_exists(table, row_key, "ìnfo", "status", status):
-                    table[0].put(row_key, {'info:status': str(status).encode('utf-8')})
-                    table[0].put(row_key, {f'status_log:{date_str}': str(status).encode('utf-8')})
-                if _column_value_exists(table, row_key, "ìnfo", "status_desc", statusDesc):
-                    table[0].put(row_key, {'info:status_desc': str(statusDesc).encode('utf-8')})
-                if _column_value_exists(table, row_key, "ìnfo", "modified_date", modifiedDate):
-                    table[0].put(row_key, {'info:modified_date': str(modifiedDate).encode('utf-8')})
-                if _column_value_exists(table, row_key, "ìnfo", "serial", serial):
-                    table[0].put(row_key, {'info:serial': str(serial).encode('utf-8')})
-                if _column_value_exists(table, row_key, "ìnfo", "valid_from", validFrom):
-                    table[0].put(row_key, {'info:valid_from': str(validFrom).encode('utf-8')})
-                if _column_value_exists(table, row_key, "ìnfo", "valid_to", validTo):
-                    table[0].put(row_key, {'info:valid_to': str(validTo).encode('utf-8')})
-                if _column_value_exists(table, row_key, "ìnfo", "request_cert_id", requestCertId):
-                    table[0].put(row_key, {'info:request_cert_id': str(requestCertId).encode('utf-8')})
-                if _column_value_exists(table, row_key, "ìnfo", "cert_status", certStatus):
-                    table[0].put(row_key, {'info:cert_status': str(certStatus).encode('utf-8')})
-                if _column_value_exists(table, row_key, "ìnfo", "cert_status_desc", certStatusDesc):
-                    table[0].put(row_key, {'info:cert_status_desc': str(certStatusDesc).encode('utf-8')})
+                if _column_value_exists(table_credential, row_key, "INFO", "STATUS", status):
+                    table_credential.put(row_key, {'INFO:STATUS': str(status)})
+                if _column_value_exists(table_credential, row_key, "INFO", "SUBJECT_DN", subjectDN):
+                    table_credential.put(row_key, {'INFO:SUBJECT_DN': str(subjectDN)})
+                if _column_value_exists(table_credential, row_key, "INFO", "STATUS_DESC", statusDesc):
+                    table_credential.put(row_key, {'INFO:STATUS_DESC': str(statusDesc)})
+                if _column_value_exists(table_credential, row_key, "INFO", "MODIFIED_DATE", modifiedDate):
+                    table_credential.put(row_key, {'INFO:MODIFIED_DATE': str(modifiedDate)})
+                if _column_value_exists(table_credential, row_key, "INFO", "SERIAL", serial):
+                    table_credential.put(row_key, {'INFO:SERIAL': str(serial)})
+                if _column_value_exists(table_credential, row_key, "INFO", "VALID_FROM", validFrom):
+                    table_credential.put(row_key, {'INFO:VALID_FROM': str(validFrom)})
+                if _column_value_exists(table_credential, row_key, "INFO", "VALID_TO", validTo):
+                    table_credential.put(row_key, {'INFO:VALID_TO': str(validTo)})
+                if _column_value_exists(table_credential, row_key, "INFO", "REQUEST_CERT_ID", requestCertId):
+                    table_credential.put(row_key, {'INFO:REQUEST_CERT_ID': str(requestCertId)})
+                if _column_value_exists(table_credential, row_key, "INFO", "CERT_STATUS", certStatus):
+                    table_credential.put(row_key, {'INFO:CERT_STATUS': str(certStatus)})
+                if _column_value_exists(table_credential, row_key, "INFO", "CERT_STATUS_DESC", certStatusDesc):
+                    table_credential.put(row_key, {'INFO:CERT_STATUS_DESC': str(certStatusDesc)})
+
         batch_credential.send()
         batch_log.send()
         logger.info(f"Batch với {len(chunk)} bản ghi đã được xử lý.")
@@ -1052,7 +1060,25 @@ async def _transfer_credential(chunk, table):
 
 def _column_value_exists(table, row_key, column_family, column_name, new_value):
     # Lấy giá trị hiện tại của cột
-    current_value = table[0].row(row_key).get(f'{column_family}:{column_name}')
+    current_value = table.row(row_key).get(f'{column_family}:{column_name}')
     check = current_value is not None and current_value != new_value and current_value != ''
     # So sánh giá trị hiện tại với giá trị mới
     return check
+
+
+def _convert_datetime(input_datetime):
+    if input_datetime and input_datetime != datetime(1, 1, 1, 0, 0):
+        return str(int(input_datetime.timestamp() * 1000))
+    return ''
+
+
+def _convert_number(input_int):
+    if input_int:
+        return str(input_int)
+    return ''
+
+
+def _convert_boolean(input_boolean):
+    if input_boolean:
+        return str(int(input_boolean))
+    return ''

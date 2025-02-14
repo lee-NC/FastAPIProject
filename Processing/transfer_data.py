@@ -313,44 +313,47 @@ async def transfer_problem_guide(hbase_connection, mongo_client):
         table = hbase_connection.table("ProblemGuide")
         for document in documents:
             row_key = str(document["_id"])
-            error_message = str(document.get("ErrorMessage", "")).encode('utf-8')
-            guide_content = str(document.get("GuideContent", "")).encode('utf-8')
-            in_used = str(document.get("InUsed", "")).encode('utf-8')
-            status = str(document.get("Status", "")).encode('utf-8')
-            status_desc = str(document.get("StatusDesc", "")).encode('utf-8')
+            error_message = str(document.get("ErrorMessage", ""))
+            guide_content = str(document.get("GuideContent", ""))
+            in_used = document.get("InUsed", False)  # Dữ liệu kiểu Boolean
+            status = str(document.get("Status", ""))
+            status_desc = str(document.get("StatusDesc", ""))
             type_error = str(document.get("type", ""))
             type_error_desc = str(document.get("type_error_desc", ""))
             created_date_check = document.get("CreatedDate", None)
             if created_date_check is not None and created_date_check != datetime(1, 1, 1, 0, 0):
-                created_date = str(int(created_date_check.timestamp() * 1000))
+                created_date = int(created_date_check.timestamp() * 1000)  # Sử dụng int trực tiếp
             else:
-                created_date = str(int(datetime.now().timestamp() * 1000))
+                created_date = int(datetime.now().timestamp() * 1000)
+
             old_item = table.row(row_key)
             if old_item is None or old_item == {}:
                 # Ghi vào HBase
                 table.put(row_key, {
-                    "info:error_message": error_message,
-                    "info:guide_content": guide_content,
-                    "info:in_used": in_used,
-                    "info:status": status,
-                    "info:status_desc": status_desc,
-                    "info:type_error": type_error,
-                    "info:type_error_desc": type_error_desc,
-                    "info:created_date": created_date,
+                    "info:error_message": error_message.encode('utf-8'),
+                    "info:guide_content": guide_content.encode('utf-8'),
+                    "info:in_used": str(in_used).encode('utf-8'),
+                    "info:status": status.encode('utf-8'),
+                    "info:status_desc": status_desc.encode('utf-8'),
+                    "info:type_error": type_error.encode('utf-8'),
+                    "info:type_error_desc": type_error_desc.encode('utf-8'),
+                    "info:created_date": str(created_date).encode('utf-8'),
                 })
             else:
-                if column_value_exists(table, row_key, "ìnfo", "status", status):
-                    table.put(row_key, {'info:status': status})
-                if column_value_exists(table, row_key, "ìnfo", "status_desc", status_desc):
-                    table.put(row_key, {'info:status_desc': status_desc})
-                if column_value_exists(table, row_key, "ìnfo", "type_error", type_error):
-                    table.put(row_key, {'info:type_error': type_error})
-                if column_value_exists(table, row_key, "ìnfo", "type_error_desc", type_error_desc):
-                    table.put(row_key, {'info:type_error_desc': type_error_desc})
-                if column_value_exists(table, row_key, "ìnfo", "error_message", error_message):
-                    table.put(row_key, {'info:error_message': error_message})
-                if column_value_exists(table, row_key, "ìnfo", "guide_content", guide_content):
-                    table.put(row_key, {'info:guide_content': guide_content})
+                # Cập nhật các trường nếu có thay đổi
+                if column_value_exists(table, row_key, "info", "status", status):
+                    table.put(row_key, {'info:status': status.encode('utf-8')})
+                if column_value_exists(table, row_key, "info", "status_desc", status_desc):
+                    table.put(row_key, {'info:status_desc': status_desc.encode('utf-8')})
+                if column_value_exists(table, row_key, "info", "type_error", type_error):
+                    table.put(row_key, {'info:type_error': type_error.encode('utf-8')})
+                if column_value_exists(table, row_key, "info", "type_error_desc", type_error_desc):
+                    table.put(row_key, {'info:type_error_desc': type_error_desc.encode('utf-8')})
+                if column_value_exists(table, row_key, "info", "error_message", error_message):
+                    table.put(row_key, {'info:error_message': error_message.encode('utf-8')})
+                if column_value_exists(table, row_key, "info", "guide_content", guide_content):
+                    table.put(row_key, {'info:guide_content': guide_content.encode('utf-8')})
+
     except Exception as e:
         print(f"Lỗi khi xử lý bảng Problem Guide: {e}")
         traceback.print_exc()
