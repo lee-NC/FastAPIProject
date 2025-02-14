@@ -11,7 +11,7 @@ def setup_logging(log_dir):
     log_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 
     # Cấu hình logging cho file (TimedRotatingFileHandler)
-    log_file = os.path.join(log_dir, "lakehouse.log")
+    log_file = os.path.join(log_dir, "app.log")
     log_handler = TimedRotatingFileHandler(
         log_file, when="midnight", interval=1, backupCount=30, encoding="utf-8"
     )
@@ -24,8 +24,7 @@ def setup_logging(log_dir):
         format="%(asctime)s - %(levelname)s - %(message)s",
         handlers=[
             logging.StreamHandler(),  # Ghi log ra console
-            logging.FileHandler(f"{log_dir}/app.log", mode='a', encoding='utf-8'),  # Ghi log vào app.log
-            log_handler  # Ghi log vào lakehouse.log (với việc chia log theo ngày)
+            log_handler  # Chỉ dùng 1 file handler để tránh lặp log
         ]
     )
 

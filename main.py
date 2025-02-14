@@ -1,94 +1,58 @@
+import asyncio
 import os
 import sys
 import time
-from fastapi import FastAPI, HTTPException, Request
+from contextlib import asynccontextmanager
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from fastapi import FastAPI, Request
 
-sys.path.append(os.path.abspath("Model"))
-sys.path.append(os.path.abspath("Processing"))
-sys.path.append(os.path.abspath("Helper"))
+from controllers import data_controller, report_controller, dashboard_controller
+from helper.config import Config
+from helper.custom_logging import setup_logging
+from processing.load_fact_tables import process_fetch_tables
 
-from Processing.load_fact_tables import process_fetch_tables
-from Processing.process_report_tele_bot import *
-from Processing.transfer_data import cut_off_data
-from Model.Request import *
+sys.path.append(os.path.abspath("config"))
+sys.path.append(os.path.abspath("controllers"))
+sys.path.append(os.path.abspath("model"))
+sys.path.append(os.path.abspath("processing"))
+sys.path.append(os.path.abspath("helper"))
+sys.path.append(os.path.abspath("repositories"))
 
-from Helper.config import Config
-from Helper.custom_logging import setup_logging
-
+# Khởi tạo ứng dụng FastAPI
 config = Config().get_config()
-
 LOG_DIR = config["log"]["path"]
 logger = setup_logging(LOG_DIR)
-app = FastAPI()
+
+
+def run_etl_fact_tables():
+    # Chạy coroutine trong vòng lặp sự kiện
+    asyncio.run(process_fetch_tables())
+
+
+async def schedule_job():
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(run_etl_fact_tables, 'cron', hour=0, minute=5)
+    print("Scheduler started. Jobs will run sequentially.")
+    scheduler.start()
+
+
+@asynccontextmanager
+async def lifespan():
+    await schedule_job()  # Khởi chạy task khi ứng dụng bắt đầu
+    yield  # Đợi cho tới khi ứng dụng tắt
+
+
+app = FastAPI(title="Data Lakehouse Server", version="1.0", lifespan=lifespan)
+
+# Đăng ký các router từ controllers
+app.include_router(data_controller.router)
+app.include_router(report_controller.router)
+app.include_router(dashboard_controller.router)
 
 
 @app.get("/", summary="Check Health", description="Check Health")
 async def read_root():
     return {"message": "Hello, World!"}
-
-
-@app.get("/fetch_data", summary="fetch data", description="fetch data")
-async def fetch_data():
-    try:
-        mess = await process_fetch_tables()
-        return HTTPException(status_code=200, detail=mess)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/report_cumulative_credential", summary="Báo cáo lũy kế", description="Báo cáo lũy kế")
-async def report_cumulative_credential(request: ReportRequest):
-    date = request.date
-    logger.info(f"report_cumulative_credential at {datetime.datetime.now()} with param {date}")
-    try:
-        if date is None:
-            raise HTTPException(status_code=400, detail="Date is required")
-        mess = await processing_accumulate_credential(date)
-        return HTTPException(status_code=200, detail=mess)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/report_accumulate_signature_transaction", summary="Thống kê giao dịch theo tháng", description="Thống kê giao dịch theo tháng")
-async def signature_transaction(request: ReportRequest):
-    date = request.date
-    logger.info(f"report_accumulate_signature_transaction at {datetime.datetime.now()} with param {date}")
-    try:
-        if date is None:
-            raise HTTPException(status_code=400, detail="Date is required")
-        mess = await processing_signature_transaction(date)
-        return HTTPException(status_code=200, detail=mess)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/report_accumulate_cert_order_register", summary="Thống kê đơn hàng và đăng ký", description="Thống kê đơn hàng và đăng ký")
-async def cert_order_register(request: ReportRequest):
-    date = request.date
-    logger.info(f"report_accumulate_cert_order_register at {datetime.datetime.now()} with param {date}")
-    try:
-        if date is None:
-            raise HTTPException(status_code=400, detail="Date is required")
-        mess = await processing_cert_order_register(date)
-        return HTTPException(status_code=200, detail=mess)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/cut_off_data", summary="cut_off_data", description="cut_off_data")
-async def cut_off_data(request: CutOffRequest):
-    table_name = request.table_name
-    logger.info(f"cut_off_data at {datetime.datetime.now()} with param {table_name}")
-    try:
-        if table_name is None:
-            raise HTTPException(status_code=400, detail="table_name is required")
-        check = await cut_off_data(config, table_name)
-        mess = "Transfer data successfully!"
-        if not check:
-            mess = "Transfer data failed!"
-        return HTTPException(status_code=200, detail=mess)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.middleware("http")

@@ -7,11 +7,11 @@ from airflow import DAG
 from airflow.utils.dates import days_ago
 from airflow.operators.python import PythonOperator
 
-sys.path.append(os.path.abspath("Processing"))
-sys.path.append(os.path.abspath("Helper"))
-from Processing.load_fact_tables import process_fetch_tables
-from Helper.config import Config
-from Helper.custom_logging import setup_logging
+sys.path.append(os.path.abspath("processing"))
+sys.path.append(os.path.abspath("helper"))
+from processing.load_fact_tables import process_fetch_tables
+from helper.config import Config
+from helper.custom_logging import setup_logging
 
 config = Config().get_config()
 

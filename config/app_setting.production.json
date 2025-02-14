@@ -1,9 +1,6 @@
 {
   "mongo": {
-    "identity_uri": "mongodb://:27017/",
-    "csc_uri": "mongodb://:27017/",
-    "vneid_uri": "mongodb://:27017/",
-    "report_uri": "mongodb://:27017/"
+    "uri": "mongodb://:27017/"
   },
   "hbase": {
     "uri": "localhost",
@@ -20,7 +17,13 @@
   "hdfs": {
     "username": "vnpt",
     "name_node_host": "localhost",
-    "port": "9870"
+    "port": "9870",
+    "data_dir": "warehouse"
+  },
+  "hive": {
+    "uri": "localhost",
+    "port": "9870",
+    "schema": "iceberg_db"
   },
   "log": {
     "path": "/usr/local/log_lakehouse"

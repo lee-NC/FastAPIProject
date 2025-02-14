@@ -1,6 +1,4 @@
 import io
-import os
-import sys
 import subprocess
 import traceback
 from datetime import datetime
@@ -9,17 +7,13 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 import logging
-
-sys.path.append(os.path.abspath("HBase/Helper"))
-from Helper.config import Config, init_connect
-from Model.DataModel import Locality
+from helper.get_config import *
+from model.data_model import Locality
 
 logger = logging.getLogger("Lakehouse")
-config = Config()
 
 
 async def cut_off_data(table_name):
-    (hbase_connection, hdfs_client, mongo_client) = init_connect(config)
     timezone = pytz.timezone('Asia/Bangkok')
     date_report = datetime.now(timezone)
     try:
@@ -29,8 +23,7 @@ async def cut_off_data(table_name):
             case "CertOrder":
                 return True
             case "SignatureTransaction":
-                table = hbase_connection.table("SignatureTransaction")
-                (start_time, end_time, count, success, file_name) = await transfer_signature_transaction(table, hdfs_client, date_report)
+                (start_time, end_time, count, success, file_name) = await transfer_signature_transaction(date_report)
                 new_row = {
                     "date_report": date_report.strftime('%Y%m%d%H%M%S'),
                     "start_time": start_time,
@@ -47,30 +40,28 @@ async def cut_off_data(table_name):
             case "PersonalSignTurnOrder":
                 return True
             case "Locality":
-                check_success = await transfer_locality_province(hdfs_client, mongo_client, date_report)
+                check_success = await transfer_locality_province(date_report)
                 return check_success
             case "ProblemGuide":
-                check_success = await transfer_problem_guide(hbase_connection, mongo_client)
+                check_success = await transfer_problem_guide()
                 return check_success
             case _:
                 return False
         if success:
-            success = add_row_to_parquet(hdfs_client, new_row)
+            success = add_row_to_parquet(new_row)
         if success:
-            success = truncate_hbase_table(table_name, hbase_connection)
+            success = truncate_hbase_table(table_name)
         return success
 
     except Exception as e:
-        print(f"Lỗi khi thực hiện transfer dữ liệu bảng {table_name} lúc {datetime.now()}: {e}")
-        traceback.print_exc()
-    finally:
-        hbase_connection.close()
-        mongo_client.close()
+        logger.error(f"Lỗi khi thực hiện transfer dữ liệu bảng {table_name} lúc {datetime.now()}: {str(e)}")
+        logger.error(traceback.format_exc())
 
 
-async def transfer_signature_transaction(table, hdfs_client, date_report):
+async def transfer_signature_transaction(date_report):
     try:
-        rows = table.scan()
+        tables, hbase_connection = init_connect_hbase(["SIGNATURE_TRANSACTION"])
+        rows = tables[0].scan()
         data = []
         for key, value in rows:
             row = {'_id': key.decode()}
@@ -84,17 +75,18 @@ async def transfer_signature_transaction(table, hdfs_client, date_report):
         from_date = datetime.fromtimestamp(timestamp=(float(data[0]['req_time']) / 1000)).strftime('%Y%m%d%H%M%S')
         to_date = datetime.fromtimestamp(timestamp=(float(data[-1]['req_time']) / 1000)).strftime('%Y%m%d%H%M%S')
         file_name = f"signature_transaction/signature_transaction_{str(from_date)}_{str(to_date)}.parquet"
-        save_file_hdfs(hdfs_client, file_name, table_result)
+        save_file_hdfs(file_name, table_result)
         return start_time, end_time, len(data), "Success", file_name
     except Exception as e:
-        mess = f"Lỗi khi ghi tệp Parquet: {e}"
-        print(mess)
-        traceback.print_exc()
+        mess = f"Lỗi khi ghi tệp Parquet: {str(e)}"
+        logger.error(mess)
+        logger.error(traceback.format_exc())
         return date_report, date_report, 0, mess, ""
 
 
-def save_file_hdfs(hdfs_client, file_path, table_result):
+def save_file_hdfs(file_path, table_result):
     try:
+        hdfs_client = init_hdfs_connection()
         buffer = io.BytesIO()
         pq.write_table(table_result, buffer)
         buffer.seek(0)
@@ -115,44 +107,43 @@ def save_file_hdfs(hdfs_client, file_path, table_result):
                 for chunk in iter(lambda: buffer.read(1024 * 1024), b''):
                     hdfs_file.write(chunk)
                     hdfs_file.flush()
-        print(f"File {file_path} đã được ghi thành công lên HDFS!")
+        logger.info(f"File {file_path} đã được ghi thành công lên HDFS!")
     except Exception as e:
-        mess = f"Lỗi khi ghi tệp Parquet: {e}"
-        print(mess)
-        traceback.print_exc()
+        mess = f"Lỗi khi ghi tệp Parquet: {str(e)}"
+        logger.error(mess)
+        logger.error(traceback.format_exc())
         return mess
     return ""
 
 
-def add_row_to_parquet(hdfs_client, new_row):
-    file_path = "config/data_cut_off.parquet"
+def add_row_to_parquet(new_row):
+    file_path = "/data_cut_off.parquet"
     try:
+        hdfs_client = init_hdfs_connection()
         df = pd.DataFrame([new_row])
         table_result = pa.Table.from_pandas(df)
         save_file_hdfs(hdfs_client, file_path, table_result)
         return True
     except Exception as e:
-        mess = f"Lỗi khi ghi tệp Parquet {file_path}: {e}"
-        print(mess)
-        traceback.print_exc()
+        mess = f"Lỗi khi ghi tệp Parquet {file_path}: {str(e)}"
+        logger.error(mess)
+        logger.error(traceback.format_exc())
         return False
 
 
 def truncate_table(table_name):
     try:
-        # Chạy lệnh truncate trong HBase shell
-        command = f"echo \"truncate '{table_name}'\" | hbase shell"
-        result = subprocess.run(command, shell=True, text=True, capture_output=True)
-
+        table, hbase_connection = init_connect_hbase([table_name])
+        result = hbase_connection.delete(table_name)
         if result.returncode == 0:
-            print(f"Table '{table_name}' truncated successfully.")
+            logger.info(f"Table '{table_name}' truncated successfully.")
             return True
         else:
-            print(f"Error truncating table '{table_name}': {result.stderr}")
+            logger.error(f"Error truncating table '{table_name}': {result.stderr}")
             return False
     except Exception as e:
-        print(f"Error truncating table '{table_name}': {e}")
-        traceback.print_exc()
+        logger.error(f"Error truncating table '{table_name}': {str(e)}")
+        logger.error(traceback.format_exc())
         return False
 
 
@@ -168,27 +159,27 @@ def truncate_hbase_table(table_name, hbase_connection):
 
             # Recreate the table
             hbase_connection.create_table(table_name, table_info)
-            print(f"Table '{table_name}' has been truncated.")
+            logger.info(f"Table '{table_name}' has been truncated.")
             return True
         else:
-            print(f"Table '{table_name}' does not exist.")
+            logger.error(f"Table '{table_name}' does not exist.")
             return False
     except Exception as e:
-        print(f"Error truncating table '{table_name}': {e}")
-        traceback.print_exc()
+        logger.error(f"Error truncating table '{table_name}': {str(e)}")
+        logger.error(traceback.format_exc())
     return False
 
 
-async def transfer_locality_province(hdfs_client, mongo_client, date_report):
+async def transfer_locality_province(date_report):
     try:
-        collection_ward = mongo_client["signservice_identity"]["Wards"]
+        collection_ward, mongo_client = init_connect_mongo('signservice_identity', 'Wards')
         document_ward = collection_ward.find()
         data = list(document_ward)
         collection_area_local = mongo_client["signservice_identity"]["AreaLocal"]
         document_area_local = collection_area_local.find()
         data_area_local = list(document_area_local)
         data_area = {}
-        file_name = f"locality/locality_{date_report.strftime('%Y%m%d%H%M%S')}.parquet"
+        file_name = f"definition/locality/locality_{date_report.strftime('%Y%m%d%H%M%S')}.parquet"
         for row in data_area_local:
             if row.get("code") != "00":
                 area_code = row.get("code", "")
@@ -280,7 +271,7 @@ async def transfer_locality_province(hdfs_client, mongo_client, date_report):
             ('co_tuyen_thu', pa.bool_()),
         ])
         table_result = pa.Table.from_pandas(grouped, schema=schema)
-        mess = save_file_hdfs(hdfs_client, file_name, table_result)
+        mess = save_file_hdfs(file_name, table_result)
         if mess != "":
             raise mess
             return False
@@ -293,24 +284,24 @@ async def transfer_locality_province(hdfs_client, mongo_client, date_report):
             "description": "Update data by request",
             "count": len(all_data)
         }
-        success = add_row_to_parquet(hdfs_client, new_row)
+        success = add_row_to_parquet(new_row)
         if not success:
             raise "Lỗi khi truncate bảng Province Locality"
             return False
         return True
     except Exception as e:
-        print(f"Lỗi khi xử lý bảng Province Locality: {e}")
-        traceback.print_exc()
+        logger.error(f"Lỗi khi xử lý bảng Province Locality: {str(e)}")
+        logger.error(traceback.format_exc())
         return False
 
-    print("Chuyển dữ liệu Locality, Province, AreaLocal thành công từ MongoDB sang HBase.")
+    logger.info("Chuyển dữ liệu Locality, Province, AreaLocal thành công từ MongoDB sang HBase.")
 
 
-async def transfer_problem_guide(hbase_connection, mongo_client):
+async def transfer_problem_guide():
     try:
-        collection = mongo_client["signservice_identity"]["ProblemGuide"]
+        collection, mongo_client = init_connect_mongo("signservice_identity", "ProblemGuide")
         documents = collection.find()
-        table = hbase_connection.table("ProblemGuide")
+        table, hbase_connection = init_connect_hbase(["PROBLEM_GUIDE"])
         for document in documents:
             row_key = str(document["_id"])
             error_message = str(document.get("ErrorMessage", ""))
@@ -330,14 +321,14 @@ async def transfer_problem_guide(hbase_connection, mongo_client):
             if old_item is None or old_item == {}:
                 # Ghi vào HBase
                 table.put(row_key, {
-                    "info:error_message": error_message.encode('utf-8'),
-                    "info:guide_content": guide_content.encode('utf-8'),
-                    "info:in_used": str(in_used).encode('utf-8'),
-                    "info:status": status.encode('utf-8'),
-                    "info:status_desc": status_desc.encode('utf-8'),
-                    "info:type_error": type_error.encode('utf-8'),
-                    "info:type_error_desc": type_error_desc.encode('utf-8'),
-                    "info:created_date": str(created_date).encode('utf-8'),
+                    "INFO:ERROR_MESSAGE": error_message.encode('utf-8'),
+                    "INFO:GUIDE_CONTENT": guide_content.encode('utf-8'),
+                    "INFO:IN_USED": str(in_used).encode('utf-8'),
+                    "INFO:STATUS": status.encode('utf-8'),
+                    "INFO:STATUS_DESC": status_desc.encode('utf-8'),
+                    "INFO:TYPE_ERROR": type_error.encode('utf-8'),
+                    "INFO:TYPE_ERROR_DESC": type_error_desc.encode('utf-8'),
+                    "INFO:CREATED_DATE": str(created_date).encode('utf-8'),
                 })
             else:
                 # Cập nhật các trường nếu có thay đổi
@@ -355,11 +346,14 @@ async def transfer_problem_guide(hbase_connection, mongo_client):
                     table.put(row_key, {'info:guide_content': guide_content.encode('utf-8')})
 
     except Exception as e:
-        print(f"Lỗi khi xử lý bảng Problem Guide: {e}")
-        traceback.print_exc()
+        logger.error(f"Lỗi khi xử lý bảng Problem Guide: {str(e)}")
+        logger.error(traceback.format_exc())
         return False
+    finally:
+        mongo_client.close()
+        hbase_connection.close()
 
-    print("Chuyển dữ liệu Problem Guide thành công từ MongoDB sang HBase.")
+    logger.info("Chuyển dữ liệu Problem Guide thành công từ MongoDB sang HBase.")
     return True
 
 

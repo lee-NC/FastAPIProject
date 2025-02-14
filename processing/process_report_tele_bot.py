@@ -1,60 +1,57 @@
 import io
-import os
-import sys
-from datetime import datetime, timedelta
+import logging
 import traceback
+from datetime import datetime, timedelta
+
 import pandas as pd
 import pyarrow as pa
-import logging
 import pyarrow.parquet as pq
 from dateutil.relativedelta import relativedelta
 from telegram import Bot
 from telegram import InputFile
-from Helper.config import Config, init_connect_report, init_connect_tele
-from Model.DataModel import *
 
-sys.path.append(os.path.abspath("HBase/Model"))
+from helper.get_config import init_hdfs_connection, init_hbase_connection, init_connect_tele
+from model.data_model import *
+
 logger = logging.getLogger("Lakehouse")
-
-config = Config()
 
 
 async def processing_signature_transaction(date_now):
-    (hbase_connection, hdfs_client) = init_connect_report(config)
+    hbase_connection = init_hbase_connection()
     temp_time = f"{date_now.year}-{date_now.month}-01T17:00:00.000Z"
     end_date = datetime.strptime(temp_time, "%Y-%m-%dT%H:%M:%S.%fZ") - timedelta(days=1)
     start_date = end_date - relativedelta(months=1)
 
-    table = hbase_connection.table('SignatureTransaction')
-    filter_start = f"SingleColumnValueFilter('info', 'req_time', >=, 'binary:{int(start_date.timestamp() * 1000)}')"
-    filter_end = f"SingleColumnValueFilter('info', 'req_time', <, 'binary:{int(end_date.timestamp() * 1000)}')"
+    table = hbase_connection.table('SIGNATURE_TRANSACTION')
+    filter_start = f"SingleColumnValueFilter('INFO', 'REQ_TIME', >=, 'binary:{int(start_date.timestamp() * 1000)}')"
+    filter_end = f"SingleColumnValueFilter('INFO', 'REQ_TIME', <, 'binary:{int(end_date.timestamp() * 1000)}')"
     filters = f"{filter_start} AND {filter_end}"
     rows = table.scan(filter=filters)
 
     status_success = "1"
-    parquet_file_name = f"signature_by_client/signature_by_client_{end_date.year}.parquet"
+    parquet_file_name = f"warehouse/signature_by_client/signature_by_client_{end_date.year}.parquet"
     file_name = f"LuotKyTheoAppKy_{end_date.year}{end_date.month:02}{end_date.day:02}"
     # Lấy dữ liệu từ HBase
     allData = [['client_id', 'client_name', 'month', 'success', 'un_success']]
     # region processing
     try:
         for key, data in rows:
-            appId = str(data.get(b'info:app_id').decode('utf-8'))
-            appName = str(data.get(b'info:app_name').decode('utf-8'))
-            reqTime = float(str(data.get(b'info:req_time').decode('utf-8'))) / 1000
+            appId = str(data.get(b'INFO:APP_ID').decode('utf-8'))
+            appName = str(data.get(b'INFO:APP_NAME').decode('utf-8'))
+            reqTime = float(str(data.get(b'INFO:REQ_TIME').decode('utf-8'))) / 1000
             month = datetime.fromtimestamp(timestamp=reqTime).strftime('%Y-%m')
             success = 0
             unSuccess = 0
-            if data.get(b'info:status').decode('utf-8') == status_success:
+            if data.get(b'INFO:STATUS').decode('utf-8') == status_success:
                 success = 1
             else:
                 unSuccess = 1
             allData.append([appId, appName, month, success, unSuccess])
     except Exception as e:
-        print(f"Lỗi trong quá trình xử lý bản ghi: {e}")
-        traceback.print_exc()
+        print(f"Lỗi trong quá trình xử lý bản ghi: {str(e)}")
+        logger.error(traceback.format_exc())
         raise
-    #endregion
+    # endregion
     if len(allData) < 2:
         return "Không có bản ghi phù hợp"
     # Chuyển đổi dữ liệu thành DataFrame
@@ -67,7 +64,7 @@ async def processing_signature_transaction(date_now):
         'un_success': 'sum'
     }).reset_index()
 
-    #region parquet
+    # region parquet
     table_parquet = grouped
     table_parquet['data_report'] = date_now.strftime("%Y/%m/%d %H:%M:%S")
     table_parquet = table_parquet[['data_report', 'client_id', 'client_name', 'month', 'success', 'un_success']]
@@ -82,11 +79,12 @@ async def processing_signature_transaction(date_now):
     ])
 
     table_result = pa.Table.from_pandas(table_parquet, schema=schema)
+    hdfs_client = init_hdfs_connection()
     mess = _save_file_hdfs(hdfs_client, parquet_file_name, table_result)
     if mess != "":
         return mess
-    #endregion
-    #region gửi file lên bot tele
+    # endregion
+    # region gửi file lên bot tele
     await send_excel_to_telegram(excel_buffer=_convert_to_excel(grouped), file_name=file_name)
     # endregion
     hbase_connection.close()
@@ -95,22 +93,27 @@ async def processing_signature_transaction(date_now):
 
 async def job_signature_transaction():
     date_now = datetime.now()
-    await processing_signature_transaction(date_now, )
+    await processing_signature_transaction(date_now)
 
 
 async def processing_accumulate_credential(date_now):
-    (hbase_connection, hdfs_client) = init_connect_report(config)
-    temp_time = f"{date_now.year}-{date_now.month}-{date_now.day - 1}T17:00:00.000Z"
-    end_date = datetime.strptime(temp_time, "%Y-%m-%dT%H:%M:%S.%fZ")
+    hbase_connection = init_hbase_connection()
+    temp_time = f"{date_now.year}-{date_now.month}-{date_now.day - 1}T17:00:00"
+    end_date = datetime.strptime(temp_time, "%Y-%m-%dT%H:%M:%S")
+    tm_end_date = end_date.timestamp()
     start_date = end_date - timedelta(days=1)
-    start_month = datetime.strptime(f"{date_now.year}-{date_now.month}-01T17:00:00.000Z", "%Y-%m-%dT%H:%M:%S.%fZ")
+    tm_start_date = start_date.timestamp()
+    start_month = datetime.strptime(f"{date_now.year}-{date_now.month}-01T17:00:00", "%Y-%m-%dT%H:%M:%S")
     start_month = start_month - timedelta(days=1)
+    tm_start_month = start_month.timestamp()
     end_month = start_month + relativedelta(months=1)
-    start_year = datetime.strptime(f"{date_now.year - 1}-12-31T17:00:00.000Z", "%Y-%m-%dT%H:%M:%S.%fZ")
+    tm_end_month = end_month.timestamp()
+    start_year = datetime.strptime(f"{date_now.year - 1}-12-31T17:00:00", "%Y-%m-%dT%H:%M:%S")
+    tm_start_year = start_year.timestamp()
     end_year = start_year + relativedelta(years=1)
+    tm_end_year = end_year.timestamp()
     file_name = f"bao_cao_san_luong_luy_ke_{end_date.year}{end_date.month:02}{end_date.day:02}"
-    parquet_file_name = f"accumulate_credential/accumulate_credential_{end_date.year}.parquet"
-
+    parquet_file_name = f"/warehouse/accumulate_credential/accumulate_credential_{end_date.year}.parquet"
     pricing_codes_ps0 = ["17187", "18046"]
 
     # dữ liệu bảng
@@ -118,33 +121,38 @@ async def processing_accumulate_credential(date_now):
     credential_ps = []
 
     # region Pm đang hoạt động và cts hết hạn
-    table_credential = hbase_connection.table('Credential')
+    table_credential = hbase_connection.table('CREDENTIAL')
     rows_credential = table_credential.scan()
     try:
         for key, data in rows_credential:
-            locality_code = data.get(b'info:locality_code').decode('utf-8')
-            if data.get(b'info:valid_from') is None or data.get(b'info:valid_from') == b'':
+            locality_code_raw = data.get(b'INFO:LOCALITY_CODE')
+            locality_code = locality_code_raw.decode('utf-8') if locality_code_raw else None
+            if locality_code == '':
                 continue
-            valid_from = datetime.fromtimestamp(timestamp=(float(str(data.get(b'info:valid_from').decode('utf-8'))) / 1000))
-            if data.get(b'info:valid_to') is None or data.get(b'info:valid_to') == b'':
+            if data.get(b'INFO:VALID_FROM') is None or data.get(b'INFO:VALID_FROM') == b'':
+                continue
+            valid_from = float(str(data.get(b'INFO:VALID_FROM').decode('utf-8'))) / 1000
+            if data.get(b'INFO:VALID_TO') is None or data.get(b'INFO:VALID_TO') == b'':
                 continue
             item_el = AccumulateCert(locality_code=locality_code)
-            valid_to = datetime.fromtimestamp(timestamp=(float(str(data.get(b'info:valid_to').decode('utf-8'))) / 1000))
+            valid_to = float(str(data.get(b'INFO:VALID_TO').decode('utf-8'))) / 1000
             # check valid
-            check_valid = int(valid_to > end_date)
-            check_year_create = int(start_year <= valid_from < end_date)
-            check_month_create = int(start_month <= valid_from < end_date)
-            check_date_create = int(start_date <= valid_from < end_date)
+            check_valid = int(valid_to > tm_end_date)
+            check_year_create = int(tm_start_year <= valid_from < tm_end_date)
+            check_month_create = int(tm_start_month <= valid_from < tm_end_date)
+            check_date_create = int(tm_start_date <= valid_from < tm_end_date)
             # check expired
-            check_year_expired = int(start_year <= valid_to < end_year)
-            check_month_expired = int(start_month <= valid_to < end_month)
-            check_date_expired = int(start_date <= start_date < end_date)
-            if data.get(b'info:status') is not None and data.get(b'info:status') != b'' and data.get(b'info:status').decode('utf-8') == "0":
-                pricing_code = data.get(b'info:pricing_code')
+            check_year_expired = int(tm_start_year <= valid_to < tm_end_year)
+            check_month_expired = int(tm_start_month <= valid_to < tm_end_month)
+            check_date_expired = int(tm_start_date <= valid_to < tm_end_date)
+            status = data.get(b'INFO:STATUS').decode('utf-8')
+            pricing_code = data.get(b'INFO:PRICING_CODE').decode('utf-8')
+            if status == "0":
                 # pm valid and expired
                 if pricing_code not in pricing_codes_ps0:
                     if check_valid == 1:
                         item_el.total = 1
+                        item_el.total_pm = 1
                         item_el.total_year = check_year_create
                         item_el.total_pm_year = check_year_create
                         item_el.total_month = check_month_create
@@ -168,8 +176,8 @@ async def processing_accumulate_credential(date_now):
                         item_el.total_date_expired = check_date_create
                         item_el.total_ps_date_expired = check_date_create
                     else:
-                        credential_ps.append(key)
-            source = data.get(b'info:source')
+                        credential_ps.append(key.decode('utf-8'))
+            source = data.get(b'INFO:SOURCE').decode('utf-8')
             if source == "4":
                 item_el.total_vneid = 1
                 item_el.total_vneid_date = check_date_create
@@ -179,49 +187,59 @@ async def processing_accumulate_credential(date_now):
             allData.append(item_el)
 
     except Exception as e:
-        print(f"Lỗi trong quá trình xử lý bản ghi: {e}")
+        print(f"Lỗi trong quá trình xử lý bản ghi: {str(e)}")
         traceback.print_exc()
         raise
     # endregion
 
-    ctf_credential = set(credential_ps)
     # region Ps tạo mới lũy kế và CTS gia hạn
-    table_cert = hbase_connection.table('Cert')
-    filter1 = f"SingleColumnValueFilter('info', 'status', =, 'binary:5')"
-    filter2 = f"SingleColumnValueFilter('info', 'request_type', =, 'binary:0')"
-    filter3 = f"SingleColumnValueFilter('info', 'request_type', =, 'binary:1')"
-    filters = f"{filter1} AND (({filter2}) OR ({filter3}))"
+    table_cert = hbase_connection.table('CERT')
+    filter1 = "SingleColumnValueFilter('REQUEST', 'STATUS', =, 'binary:5')"
+    filter2 = "SingleColumnValueFilter('REQUEST', 'REQUEST_TYPE', =, 'binary:0')"
+    filter3 = "SingleColumnValueFilter('REQUEST', 'REQUEST_TYPE', =, 'binary:1')"
+
+    # Kết hợp bộ lọc đúng cách
+    filters = f"({filter1}) AND (({filter2}) OR ({filter3}))"
     rows_cert = table_cert.scan(filter=filters)
 
     try:
         for key, data in rows_cert:
-            pricing_code = data.get(b'info:pricing_code')
-            locality_code = data.get(b'info:locality_code')
-            date = data.get(b'info:created_date')
-            if date is None or date == b'' or date == b'0':
+            pricing_code_raw = data.get(b'REQUEST:PRICING_CODE')
+            pricing_code = pricing_code_raw.decode('utf-8') if pricing_code_raw else None
+            locality_code_raw = data.get(b'REQUEST:LOCALITY_CODE')
+            locality_code = locality_code_raw.decode('utf-8') if locality_code_raw else None
+            if locality_code == '':
                 continue
-            created_date = datetime.fromtimestamp(timestamp=(float(str(date.decode('utf-8'))) / 1000))
-            request_type = data.get(b'info:request_type')
-            credential_id = data.get(b'info:credential_id').decode('utf-8')
+            created_date_str = data.get(b'REQUEST:CREATED_DATE')
+            if created_date_str is None or created_date_str == b'' or created_date_str == b'0':
+                continue
+            created_date = float(str(created_date_str.decode('utf-8'))) / 1000
+            updated_date_str = data.get(b'REQUEST:UPDATED_TIME')
+            if updated_date_str is None or updated_date_str == b'' or created_date_str == b'0':
+                continue
+            updated_date = float(str(updated_date_str.decode('utf-8'))) / 1000
+            request_type = data.get(b'REQUEST:REQUEST_TYPE').decode('utf-8')
+            credential_id = data.get(b'REQUEST:CREDENTIAL_ID').decode('utf-8')
             # check valid
-            check_year_create = int(start_year <= created_date < end_date)
-            check_month_create = int(start_month <= created_date < end_date)
-            check_date_create = int(start_date <= created_date < end_date)
-
+            check_year_create = int(tm_start_year <= created_date < tm_end_date)
+            check_month_create = int(tm_start_month <= created_date or updated_date < tm_end_date)
+            check_date_create = int(tm_start_date <= created_date or updated_date < tm_end_date)
             item_el = AccumulateCert(locality_code=locality_code)
             # ps new and extend
             if pricing_code in pricing_codes_ps0:
-                if request_type == "0":
-                    if credential_id in ctf_credential:
+                if request_type == "0" and pricing_code == "17187":
+                    if credential_id in credential_ps:
                         item_el.total = 1
+                        item_el.total_ps = 1
                         item_el.total_year = check_year_create
                         item_el.total_ps_year = check_year_create
                         item_el.total_month = check_month_create
                         item_el.total_ps_month = check_month_create
                         item_el.total_date = check_date_create
                         item_el.total_ps_date = check_date_create
-                if request_type == "1":
+                else:
                     item_el.total_extend = 1
+                    item_el.total_ps_extend = 1
                     item_el.total_year_extend = check_year_create
                     item_el.total_ps_year_extend = check_year_create
                     item_el.total_month_extend = check_month_create
@@ -229,8 +247,9 @@ async def processing_accumulate_credential(date_now):
                     item_el.total_date_extend = check_date_create
                     item_el.total_ps_date_extend = check_date_create
             # pm extend
-            else:
+            elif request_type == "1":
                 item_el.total_extend = 1
+                item_el.total_pm_extend = 1
                 item_el.total_year_extend = check_year_create
                 item_el.total_pm_year_extend = check_year_create
                 item_el.total_month_extend = check_month_create
@@ -240,8 +259,8 @@ async def processing_accumulate_credential(date_now):
             allData.append(item_el)
 
     except Exception as e:
-        print(f"Lỗi trong quá trình xử lý bản ghi: {e}")
-        traceback.print_exc()
+        print(f"Lỗi trong quá trình xử lý bản ghi: {str(e)}")
+        logger.error(traceback.format_exc())
         raise
     # endregion
 
@@ -293,7 +312,7 @@ async def processing_accumulate_credential(date_now):
 
     }).reset_index()
 
-    #region Lưu dữ liệu vào file Parquet
+    # region Lưu dữ liệu vào file Parquet
     table_parquet = grouped
     table_parquet['date_report'] = datetime.now()
     table_parquet = table_parquet[[
@@ -383,12 +402,13 @@ async def processing_accumulate_credential(date_now):
 
     # Chuyển đổi DataFrame sang Table của PyArrow
     table_result = pa.Table.from_pandas(table_parquet, schema=schema)
+    hdfs_client = init_hdfs_connection()
     mess = _save_file_hdfs(hdfs_client, parquet_file_name, table_result)
     if mess != "":
         return mess
-    #endregion
+    # endregion
 
-    #region gửi file tele
+    # region gửi file tele
     end_date_str = end_date.strftime("%d/%m/%Y")
     header_index = ["TTKD VNPT T/TP",
                     "Tổng sản lượng CTS đang hoạt động dịch vụ VNPT SmartCA",
@@ -431,22 +451,23 @@ async def processing_accumulate_credential(date_now):
     grouped = grouped.drop('date_report', axis=1)
     grouped.columns = header_index
     await send_excel_to_telegram(excel_buffer=_convert_to_excel(grouped), file_name=file_name)
-    #endregion
+    # endregion
     hbase_connection.close()
     return ""
 
 
 async def job_accumulate_credential():
     date_now = datetime.now()
-    await processing_accumulate_credential(date_now, )
+    await processing_accumulate_credential(date_now)
 
 
 async def processing_cert_order_register(date_now):
-    (hbase_connection, hdfs_client) = init_connect_report(config)
+    hbase_connection = init_hbase_connection()
+    hdfs_client = init_hdfs_connection()
     temp_time = f"{date_now.year}-{date_now.month}-01T17:00:00.000Z"
     end_date = datetime.strptime(temp_time, "%Y-%m-%dT%H:%M:%S.%fZ") - timedelta(days=1)
     start_date = end_date - relativedelta(months=1)
-    parquet_file_name = f"cert_order_register/cert_order_register_{end_date.year}.parquet"
+    parquet_file_name = f"warehouse/cert_order_register/cert_order_register_{end_date.year}.parquet"
     file_name = f"TrangThaiDonHangDangKy{end_date.year}{end_date.month:02}{end_date.day:02}"
     # Lấy dữ liệu từ HBase
     allData = []
@@ -456,58 +477,59 @@ async def processing_cert_order_register(date_now):
     status_cert_order = []
     status_register = []
     for data in status_dict:
-        if data['type'] != 'status':
+        if data['type'] != 'STATUS_DEFINITION':
             continue
-        if data['table'] == 'CertOrder':
+        if data['table'] == 'CERT_ORDER':
             status_cert_order.append(data)
-        if data['table'] == 'Register':
+        if data['table'] == 'REGISTER':
             status_register.append(data)
     # region Order
-    table_order = hbase_connection.table('CertOrder')
-    filter_order_start1 = f"SingleColumnValueFilter('info', 'created_date', >=, 'binary:{int(start_date.timestamp() * 1000)}')"
-    filter_order_end1 = f"SingleColumnValueFilter('info', 'created_date', <, 'binary:{int(end_date.timestamp() * 1000)}')"
-    filter_order_start2 = f"SingleColumnValueFilter('info', 'updated_date', >=, 'binary:{int(start_date.timestamp() * 1000)}')"
-    filter_order_end2 = f"SingleColumnValueFilter('info', 'updated_date', <, 'binary:{int(end_date.timestamp() * 1000)}')"
+    table_order = hbase_connection.table('CERT_ORDER')
+    filter_order_start1 = f"SingleColumnValueFilter('INFO', 'CREATED_DATE', >=, 'binary:{int(start_date.timestamp() * 1000)}')"
+    filter_order_end1 = f"SingleColumnValueFilter('INFO', 'CREATED_DATE', <, 'binary:{int(end_date.timestamp() * 1000)}')"
+    filter_order_start2 = f"SingleColumnValueFilter('INFO', 'UPDATED_DATE', >=, 'binary:{int(start_date.timestamp() * 1000)}')"
+    filter_order_end2 = f"SingleColumnValueFilter('INFO', 'UPDATED_DATE', <, 'binary:{int(end_date.timestamp() * 1000)}')"
     filters = f"({filter_order_start1} AND {filter_order_end1}) OR ({filter_order_start2} AND {filter_order_end2})"
     rows_order = table_order.scan(filter=filters)
 
     try:
         for key, data in rows_order:
             item = CertOrderRegister(end_date_str)
-            cert_order.append(data.get(b'info:identity_id').decode('utf-8'))
-            item.ma_tinh = _check_status_string(data.get(b'info:locality_code').decode('utf-8'))
-            item.sdt_lh = _check_status_string(data.get(b'info:phone').decode('utf-8'))
-            item.ten_kh = _check_status_string(data.get(b'info:full_name').decode('utf-8'))
-            item.so_gt = _check_status_string(data.get(b'info:uid').decode('utf-8'))
-            item.ma_tb = _check_status_string(data.get(b'info:ma_tb').decode('utf-8'))
-            item.ma_don_hang = _check_status_string(data.get(b'info:ma_gd').decode('utf-8'))
-            item.dia_chi_ct = _check_status_string(data.get(b'info:address').decode('utf-8'))
-            created_date = datetime.fromtimestamp(timestamp=(float(str(data.get(b'info:created_date').decode('utf-8'))) / 1000))
+            cert_order.append(data.get(b'INFO:IDENTITY_ID').decode('utf-8'))
+            item.ma_tinh = _check_status_string(data.get(b'INFO:LOCALITY_CODE').decode('utf-8'))
+            item.sdt_lh = _check_status_string(data.get(b'INFO:PHONE').decode('utf-8'))
+            item.ten_kh = _check_status_string(data.get(b'INFO:FULL_NAME').decode('utf-8'))
+            item.so_gt = _check_status_string(data.get(b'INFO:UID').decode('utf-8'))
+            item.ma_tb = _check_status_string(data.get(b'INFO:MA_TB').decode('utf-8'))
+            item.ma_don_hang = _check_status_string(data.get(b'INFO:MA_GD').decode('utf-8'))
+            item.dia_chi_ct = _check_status_string(data.get(b'INFO:ADDRESS').decode('utf-8'))
+            created_date = datetime.fromtimestamp(
+                timestamp=(float(str(data.get(b'INFO:CREATED_DATE').decode('utf-8'))) / 1000))
             if created_date != 'None' and created_date != b'' and created_date != b"":
                 item.ngay_tao_don = (created_date + timedelta(hours=7)).strftime("%Y/%m/%d %H:%M:%S")
-            log_created_date = data.get(b'info:log_created_date').decode('utf-8')
+            log_created_date = data.get(b'INFO:LOG_CREATED_DATE').decode('utf-8')
             if log_created_date != 'None' and log_created_date != b'' and log_created_date != b"":
-                item.ngay_thuc_hien = (datetime.fromtimestamp(timestamp=(float(str(log_created_date)) / 1000)) + timedelta(hours=7)).strftime(
-                    "%Y/%m/%d %H:%M:%S")
-                item.nguyen_nhan = data.get(b'info:log_content').decode('utf-8')
-            item.kenh_ban = _check_status_string(data.get(b'info:client_name').decode('utf-8'))
-            item.loai_yeu_cau = _check_status_string(data.get(b'info:type_desc').decode('utf-8'))
-            status = _check_status_string(data.get(b'info:status').decode('utf-8'))
+                item.ngay_thuc_hien = (
+                        datetime.fromtimestamp(timestamp=(float(str(log_created_date)) / 1000)) + timedelta(hours=7)).strftime("%Y/%m/%d %H:%M:%S")
+                item.nguyen_nhan = data.get(b'INFO:LOG_CONTENT').decode('utf-8')
+            item.kenh_ban = _check_status_string(data.get(b'INFO:CLIENT_NAME').decode('utf-8'))
+            item.loai_yeu_cau = _check_status_string(data.get(b'INFO:TYPE_DESC').decode('utf-8'))
+            status = _check_status_string(data.get(b'INFO:STATUS').decode('utf-8'))
             status_desc = None
             if status != '':
                 status_desc = next((entry for entry in status_cert_order if entry['code'] == int(status)), None)
             if status_desc is not None:
                 item.ly_do_gd = status_desc['description_vi']
             else:
-                item.ly_do_gd = _check_status_string(data.get(b'info:status_desc').decode('utf-8'))
-            item.toc_do_id = _check_status_string(data.get(b'info:pricing_code').decode('utf-8'))
-            item.ten_goi_cuoc = _check_status_string(data.get(b'info:pricing_name').decode('utf-8'))
-            item.gia_goi_cuoc = _check_status_string(data.get(b'info:pricing_price').decode('utf-8'))
+                item.ly_do_gd = _check_status_string(data.get(b'INFO:STATUS_DESC').decode('utf-8'))
+            item.toc_do_id = _check_status_string(data.get(b'INFO:PRICING_CODE').decode('utf-8'))
+            item.ten_goi_cuoc = _check_status_string(data.get(b'INFO:PRICING_NAME').decode('utf-8'))
+            item.gia_goi_cuoc = _check_status_string(data.get(b'INFO:PRICING_PRICE').decode('utf-8'))
             item.trang_thai_tk = ""
             allData.append(item)
     except Exception as e:
-        print(f"Lỗi trong quá trình xử lý bản ghi: {e}")
-        traceback.print_exc()
+        print(f"Lỗi trong quá trình xử lý bản ghi: {str(e)}")
+        logger.error(traceback.format_exc())
         raise
 
     # endregion
@@ -517,9 +539,9 @@ async def processing_cert_order_register(date_now):
     # endregion
 
     # region Register
-    table_register = hbase_connection.table('User')
-    filter_start = f"SingleColumnValueFilter('info', 'create_date', >=, 'binary:{int(start_date.timestamp() * 1000)}')"
-    filter_end = f"SingleColumnValueFilter('info', 'create_date', <, 'binary:{int(end_date.timestamp() * 1000)}')"
+    table_register = hbase_connection.table('USER_INFO')
+    filter_start = f"SingleColumnValueFilter('REGISTER', 'CREATE_DATE', >=, 'binary:{int(start_date.timestamp() * 1000)}')"
+    filter_end = f"SingleColumnValueFilter('REGISTER', 'CREATE_DATE', <, 'binary:{int(end_date.timestamp() * 1000)}')"
     filters = f"{filter_start} AND {filter_end}"
     rows_register = table_register.scan(filter=filters)
 
@@ -528,38 +550,39 @@ async def processing_cert_order_register(date_now):
             if key.decode('utf-8') in cert_order:
                 continue
             item = CertOrderRegister(end_date_str)
-            province_id = _check_status_string(data.get(b'register:province_id').decode('utf-8'))
+            province_id = _check_status_string(data.get(b'REGISTER:PROVINCE_ID').decode('utf-8'))
             if province_id != '':
                 item.ma_tinh = _check_province_code(provinces, province_id)
-            item.sdt_lh = _check_status_string(data.get(b'register:phone').decode('utf-8'))
-            item.ten_kh = _check_status_string(data.get(b'register:full_name').decode('utf-8'))
-            item.so_gt = _check_status_string(data.get(b'register:uid').decode('utf-8'))
-            item.dia_chi_ct = _check_status_string(data.get(b'register:address').decode('utf-8'))
+            item.sdt_lh = _check_status_string(data.get(b'REGISTER:PHONE').decode('utf-8'))
+            item.ten_kh = _check_status_string(data.get(b'REGISTER:FULL_NAME').decode('utf-8'))
+            item.so_gt = _check_status_string(data.get(b'REGISTER:UID').decode('utf-8'))
+            item.dia_chi_ct = _check_status_string(data.get(b'REGISTER:ADDRESS').decode('utf-8'))
             created_date = datetime.fromtimestamp(
-                timestamp=(float(str(_check_status_string(data.get(b'register:create_date').decode('utf-8')))) / 1000))
+                timestamp=(float(str(_check_status_string(data.get(b'REGISTER:CREATE_DATE').decode('utf-8')))) / 1000))
             if created_date != 'None' and created_date != b'' and created_date != b"":
                 item.ngay_tao_don = (created_date + timedelta(hours=7)).strftime("%Y/%m/%d %H:%M:%S")
-            log_created_date = _check_status_string(data.get(b'register:modified_date').decode('utf-8'))
+            log_created_date = _check_status_string(data.get(b'REGISTER:MODIFIED_DATE').decode('utf-8'))
             if log_created_date != 'None' and log_created_date != b'' and log_created_date != b"":
-                item.ngay_thuc_hien = _check_status_string((datetime.fromtimestamp(timestamp=(float(str(log_created_date)) / 1000)) +
-                                                            timedelta(hours=7)).strftime("%Y/%m/%d %H:%M:%S"))
+                item.ngay_thuc_hien = _check_status_string(
+                    (datetime.fromtimestamp(timestamp=(float(str(log_created_date)) / 1000)) +
+                     timedelta(hours=7)).strftime("%Y/%m/%d %H:%M:%S"))
             else:
                 item.ngay_thuc_hien = item.ngay_tao_don
-            status = _check_status_string(data.get(b'register:status').decode('utf-8'))
+            status = _check_status_string(data.get(b'REGISTER:STATUS').decode('utf-8'))
             status_desc = None
             if status != '':
                 status_desc = next((entry for entry in status_register if entry['code'] == int(status)), None)
             if status_desc is not None:
                 status = status_desc['description_vi']
             else:
-                status = _check_status_string(data.get(b'register:status_desc').decode('utf-8'))
+                status = _check_status_string(data.get(b'REGISTER:STATUS_DESC').decode('utf-8'))
             item.ly_do_gd = status
             item.nguyen_nhan = status
             item.trang_thai_tk = status
             allData.append(item)
     except Exception as e:
-        print(f"Lỗi trong quá trình xử lý bản ghi: {e}")
-        traceback.print_exc()
+        print(f"Lỗi trong quá trình xử lý bản ghi: {str(e)}")
+        logger.error(traceback.format_exc())
         raise
     # endregion
 
@@ -648,7 +671,7 @@ async def processing_cert_order_register(date_now):
 
 async def job_cert_order_register():
     date_now = datetime.now()
-    await processing_cert_order_register(date_now, )
+    await processing_cert_order_register(date_now)
 
 
 def _save_file_hdfs(hdfs_client, file_path, table_result):
@@ -674,9 +697,9 @@ def _save_file_hdfs(hdfs_client, file_path, table_result):
                 hdfs_file.flush()
         print(f"File {file_path} đã được ghi thành công lên HDFS!")
     except Exception as e:
-        mess = f"Lỗi khi ghi tệp Parquet: {e}"
+        mess = f"Lỗi khi ghi tệp Parquet: {str(e)}"
         print(mess)
-        traceback.print_exc()
+        logger.error(traceback.format_exc())
         return mess
     return ""
 
@@ -691,14 +714,14 @@ def _convert_to_excel(df):
 
 async def send_excel_to_telegram(excel_buffer, file_name):
     try:
-        access_token, chat_id = init_connect_tele(config)
+        access_token, chat_id = init_connect_tele()
         bot = Bot(token=access_token)
         # Tạo InputFile từ buffer
         excel_buffer.name = f"{file_name}.xlsx"  # Cung cấp tên cho file khi gửi
         await bot.send_document(chat_id=chat_id, document=InputFile(excel_buffer))
     except Exception as e:
-        print(f"Lỗi khi gửi file telegram. {e}")
-        traceback.print_exc()
+        print(f"Lỗi khi gửi file telegram. {str(e)}")
+        logger.error(traceback.format_exc())
 
 
 def _check_status_string(string):
@@ -709,7 +732,8 @@ def _check_status_string(string):
 
 
 def _check_province_code(provinces, province_id):
-    if province_id == "None" or province_id is None or province_id == "" or province_id == '' or not str.isdigit(province_id):
+    if province_id == "None" or province_id is None or province_id == "" or province_id == '' or not str.isdigit(
+            province_id):
         return province_id
     else:
         if int(province_id) in provinces['province_id'].values:
@@ -729,14 +753,14 @@ def _query_parquet_by_field(hdfs_client, file_path, field_name, filter_value):
             filtered_df = df
         return filtered_df.to_dict(orient='records')
     except Exception as e:
-        print(f"Lỗi khi truy vấn file Parquet: {e}")
-        traceback.print_exc()
+        print(f"Lỗi khi truy vấn file Parquet: {str(e)}")
+        logger.error(traceback.format_exc())
         return None
 
 
 def _get_data_locality(hdfs_client):
     try:
-        file_path = "config/data_cut_off.parquet"
+        file_path = "/data_cut_off.parquet"
         list_file = _query_parquet_by_field(hdfs_client, file_path, "table_name", "Locality")
         list_file = sorted(list_file, key=lambda x: x["date_report"], reverse=True)
         file_name = list_file[0]["file_name"]
@@ -746,17 +770,17 @@ def _get_data_locality(hdfs_client):
             df = table.to_pandas()
         return df
     except Exception as e:
-        print(f"Lỗi khi truy vấn file Parquet: {e}")
-        traceback.print_exc()
+        print(f"Lỗi khi truy vấn file Parquet: {str(e)}")
+        logger.error(traceback.format_exc())
         return None
 
 
 def _get_status_dictionary(hdfs_client):
     try:
-        file_path = "config/refer_vi.parquet"
+        file_path = "definition/refer_vi.parquet"
         df = _query_parquet_by_field(hdfs_client, file_path, None, None)
         return df
     except Exception as e:
-        print(f"Lỗi khi truy vấn file Parquet: {e}")
-        traceback.print_exc()
+        print(f"Lỗi khi truy vấn file Parquet: {str(e)}")
+        logger.error(traceback.format_exc())
         return None
