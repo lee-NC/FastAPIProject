@@ -8,17 +8,16 @@
   },
   "spark": {
     "app_name": "SparkHBaseTest",
-    "port": "8081"
+    "port": "4050"
   },
   "telegram": {
     "access_token": "",
     "chat_id": ""
   },
   "hdfs": {
-    "username": "vnpt",
+    "username": "lengo",
     "name_node_host": "localhost",
-    "port": "9870",
-    "data_dir": "warehouse"
+    "port": "9870"
   },
   "hive": {
     "uri": "localhost",
@@ -26,6 +25,6 @@
     "schema": "iceberg_db"
   },
   "log": {
-    "path": "/usr/local/log_lakehouse"
+    "path": "D:\\Chaultn\\log_lakehouse"
   }
 }

@@ -18,3 +18,4 @@ class DashboardRequest(BaseModel):
     locality: Optional[str] = None
     account_type: Optional[str] = None
     source: Optional[str] = None
+    by_type: Optional[bool] = False

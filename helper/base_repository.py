@@ -1,7 +1,9 @@
-import traceback
-import logging
 import asyncio
+import logging
+import traceback
+
 import pandas as pd
+
 from helper.get_config import init_hive_connection
 
 logger = logging.getLogger(__name__)
@@ -10,13 +12,13 @@ logger = logging.getLogger(__name__)
 class BaseRepository:
     """Base repository dùng chung cho các bảng Hive"""
 
-    def __init__(self, database: str, table_name: str):
-        self.database = database
+    def __init__(self, table_name: str):
         self.table_name = table_name
 
-    async def with_connection(self, func):
+    @staticmethod
+    async def with_connection(func):
         """Hàm hỗ trợ kết nối Hive với async"""
-        connection = await asyncio.to_thread(init_hive_connection, self.database)
+        connection = await asyncio.to_thread(init_hive_connection)
         try:
             return await asyncio.to_thread(func, connection)
         except Exception:
@@ -27,9 +29,9 @@ class BaseRepository:
     async def fetch_all(self, query: str, as_dataframe: bool = False):
         """Thực thi truy vấn SELECT và trả về kết quả."""
 
-        def execute_query(conn):
+        async def execute_query(conn):
             with conn.cursor() as cursor:
-                cursor.execute(query)
+                await cursor.execute(query)
                 columns = [desc[0] for desc in cursor.description]
                 rows = cursor.fetchall()
                 if as_dataframe:
@@ -45,14 +47,14 @@ class BaseRepository:
     async def get_by_id(self, row_key: str):
         """Lấy dữ liệu theo ID (row key)"""
         query = f"SELECT * FROM {self.table_name} WHERE id = '{row_key}'"
-        return await self.fetch_all(query, as_dataframe=False)
+        return await self.fetch_all(query, as_dataframe=True)
 
     async def get_all(self):
         """Lấy toàn bộ dữ liệu trong bảng"""
         query = f"SELECT * FROM {self.table_name}"
         return await self.fetch_all(query, as_dataframe=True)
 
-    async def insert(self, row_key: str, data: dict):
+    async def insert(self, data: dict):
         """Thêm dữ liệu vào bảng"""
         columns = ', '.join(data.keys())
         values = ', '.join(f"'{v}'" for v in data.values())
@@ -63,17 +65,3 @@ class BaseRepository:
         """Xóa toàn bộ dữ liệu trong bảng"""
         query = f"TRUNCATE TABLE {self.table_name}"
         return await self.execute(query)
-
-    async def count(self, filters=None):
-        """Đếm số dòng trong bảng với điều kiện filter"""
-        query = f"SELECT COUNT(*) FROM {self.table_name}"
-        if filters:
-            query += f" WHERE {filters}"
-        return await self.fetch_all(query, as_dataframe=False)
-
-    async def get_ids_by_query(self, filters: str = ""):
-        """Lấy danh sách ID theo điều kiện filter"""
-        query = f"SELECT id FROM {self.table_name}"
-        if filters:
-            query += f" WHERE {filters}"
-        return await self.fetch_all(query, as_dataframe=False)

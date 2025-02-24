@@ -21,6 +21,11 @@ class ResponseModel(BaseModel):
         return cls(code=400, codeDesc="BAD_REQUEST", message=message, content=None)
 
     @classmethod
+    def not_found(cls, message: str = "Không tìm thấy thông tin"):
+        """ Không tìm thấy thông tin """
+        return cls(code=404, codeDesc="NOT_FOUND", message=message, content=None)
+
+    @classmethod
     def timeout(cls, message: str = "Chờ quá lâu, vui lòng thử lại"):
         """ Trả về response khi request quá thời gian """
         return cls(code=499, codeDesc="TIMEOUT", message=message, content=None)
@@ -30,12 +35,3 @@ class ResponseModel(BaseModel):
         """ Trả về response khi request quá thời gian """
         return cls(code=500, codeDesc="SERVER_ERROR", message=message, content=None)
 
-
-class DashboardResponse(BaseModel):
-    app_name: Optional[datetime] = None
-    quantity: Optional[int] = None
-    locality: Optional[str] = None
-    account_type: Optional[str] = None
-    source: Optional[str] = None
-    month: Optional[str] = None
-    day: Optional[str] = None

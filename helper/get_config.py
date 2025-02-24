@@ -13,6 +13,8 @@ config = Config()
 
 logger = logging.getLogger("Lakehouse")
 
+CHUNK_SIZE = 5000
+
 
 def init_connect_hbase(table_names):
     task_config = config.get_config()
@@ -83,23 +85,26 @@ def init_hdfs_connection():
 def init_spark_connection():
     task_config = config.get_config()
     hdfs_info = task_config["hdfs"]
-    spark = SparkSession.builder \
-        .appName("MongoDB to Iceberg") \
-        .config("spark.sql.catalog.lakehouse", "org.apache.iceberg.spark.SparkCatalog") \
-        .config("spark.sql.catalog.lakehouse.type", "hadoop") \
-        .config("spark.sql.catalog.lakehouse.warehouse",
-                f'hdfs://{hdfs_info["name_node_host"]}:{hdfs_info["port"]}/{hdfs_info["data_dir"]}') \
-        .config("spark.jars.packages", "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.4.1") \
-        .getOrCreate()
+    spark = (SparkSession.builder.appName("MongoDB-to-Iceberg")
+             .config("spark.sql.catalog.iceberg", "org.apache.iceberg.spark.SparkCatalog")
+             .config("spark.sql.catalog.iceberg.type", "hive")
+             .config("spark.sql.catalog.hive.uri", "thrift://localhost:9083")
+             .config("spark.sql.catalog.iceberg.warehouse", f'hdfs://{hdfs_info["name_node_host"]}:{hdfs_info["port"]}/{hdfs_info["data_dir"]}')
+             .enableHiveSupport().getOrCreate())
     return spark
 
 
-def init_spark_mongodb_connection(spark, node_name, collection_name):
+def init_spark_mongodb_connection(spark, node_name, collection_name, pipeline):
     task_config = config.get_config()
     mongo = task_config["mongo"]
     mongo_uri = mongo["uri"]
+    mongo_uri = str.replace(mongo_uri, "{NODE_NAME}", node_name)
+    mongo_uri = str.replace(mongo_uri, "{NODE_REP}", str.replace(node_name, "_", ""))
     mongo_df_info = spark.read.format("com.mongodb.spark.sql.DefaultSource") \
         .option("uri", mongo_uri) \
+        .option("pipeline", pipeline) \
+        .option("partitioner", "MongoPaginateBySizePartitioner") \
+        .option("batchSize", CHUNK_SIZE) \
         .option("database", node_name) \
         .option("collection", collection_name) \
         .load()
@@ -112,5 +117,5 @@ def init_hive_connection():
     hive_uri = hive_config["uri"]
     hive_port = hive_config["port"]
     hive_schemas = hive_config["schema"]
-    connection = hive.Connection(host=hive_uri, port=hive_port, database=hive_schemas)
+    connection = hive.Connection(host=hive_uri, port=hive_port, database=hive_schemas, auth="NOSASL")
     return connection

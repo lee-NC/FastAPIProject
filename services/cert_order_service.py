@@ -22,13 +22,7 @@ class CertOrderService:
     async def count_total_cert_order(self, end_date: datetime, locality: str):
         """Đếm cert_order hoạt động"""
         try:
-            timestamp = str(int(end_date.timestamp() * 1000))
-            filters = f"""SingleColumnValueFilter('INFO', 'CREATED_DATE', <=, 'binary:{timestamp}')"""
-
-            if locality is not None and locality != "":
-                filters += f" AND SingleColumnValueFilter('INFO', 'LOCALITY_CODE', =, 'binary:{locality}')"
-            logger.info(filters)
-            return await self.cert_order_repo.count(filters)
+            return await self.cert_order_repo.count_by_time_and_locality(None, end_date, locality)
 
         except Exception as e:
             logger.error(f"Error count_total_cert_order: {str(e)}")
@@ -37,17 +31,9 @@ class CertOrderService:
 
     async def count_new_cert_order(self, start_date, end_date, locality):
         try:
-            start_timestamp = str(int(start_date.timestamp() * 1000))
-            end_timestamp = str(int(end_date.timestamp() * 1000))
-            filter1 = f"SingleColumnValueFilter('INFO', 'CREATED_DATE', <=, 'binary:{end_timestamp}')"
-            filter2 = f"SingleColumnValueFilter('INFO', 'CREATED_DATE', >=, 'binary:{start_timestamp}') "
-            filters = f"({filter1}) AND  ({filter2})"
-            if locality is not None and locality != "":
-                filters += f" AND (SingleColumnValueFilter('INFO', 'LOCALITY_CODE', =, 'binary:{locality}'))"
-            logger.info(filters)
-            return await self.cert_order_repo.count(filters)
+            return await self.cert_order_repo.count_by_time_and_locality(start_date, end_date, locality)
 
         except Exception as e:
-            logger.error(f"Error count_total_cert_order: {str(e)}")
+            logger.error(f"Error count_new_cert_order: {str(e)}")
             logger.error(traceback.format_exc())
         return 0

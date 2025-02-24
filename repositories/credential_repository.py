@@ -1,18 +1,37 @@
+import logging
+import traceback
+from datetime import datetime
+
+import pandas as pd
+
 from helper.base_repository import BaseRepository
+
+logger = logging.getLogger(__name__)
 
 
 class CredentialRepository(BaseRepository):
     def __init__(self):
-        super().__init__("CREDENTIAL")
+        super().__init__("credential")
 
-    async def count_credential_by_user_ids(self, filters: str = None, user_ids: list = []):
-        """Đếm số lượng credential của user theo user_ids và trạng thái"""
-        def scan(table):
-            active_users = set()
-            for _, data in table.scan(filter=filters, columns=['INFO:IDENTITY_ID']):
-                identity_id = data.get(b'INFO:IDENTITY_ID', b'').decode('utf-8')
-                if identity_id in user_ids:
-                    active_users.add(identity_id)
-            return len(active_users)
-
-        return await self.with_connection(scan)
+    async def count_valid_credential(self, start_date: datetime = None, end_date: datetime = None,
+                                     locality: str = None):
+        """Đếm số lượng credential được tạo"""
+        try:
+            end_date_str = int(end_date.timestamp() * 1000)
+            query = (f"SELECT rowkey FROM {self.table_name} where status = '0' "
+                     f"and CAST(COALESCE(valid_from, '0') AS BIGINT) <=  {end_date_str}  "
+                     f"and CAST(COALESCE(valid_to, '0') AS BIGINT) >= {end_date_str} ")
+            if start_date is not None:
+                start_date_str = int(start_date.timestamp() * 1000)
+                query = (f"SELECT rowkey FROM {self.table_name} "
+                         f"where CAST(COALESCE(valid_from, '0') AS BIGINT) <= {end_date_str}  "
+                         f"and CAST(COALESCE(valid_from, '0') AS BIGINT) >= {start_date_str} ")
+            if locality:
+                query += f" AND locality_code = '{locality}'"
+            res = await self.fetch_all(query, as_dataframe=True)
+            if isinstance(res, pd.DataFrame):
+                res = res.iloc[:, 0].tolist()
+            return res
+        except Exception:
+            logger.error(traceback.format_exc())
+        return 0
