@@ -22,7 +22,7 @@ class CredentialService:
     async def count_total_credential(self, end_date: datetime, locality: str):
         try:
             res = await self.credential_repo.count_valid_credential(None, end_date, locality)
-            return len(set(res))
+            return res
         except Exception as e:
             logger.error(f"Error count_total_credential: {str(e)}")
             logger.error(traceback.format_exc())
@@ -31,7 +31,6 @@ class CredentialService:
     async def count_new_credential(self, start_date, end_date, locality):
         try:
             return await self.credential_repo.count_valid_credential(start_date, end_date, locality)
-
         except Exception as e:
             logger.error(f"Error count_total_credential: {str(e)}")
             logger.error(traceback.format_exc())

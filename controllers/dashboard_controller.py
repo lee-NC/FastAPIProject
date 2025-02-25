@@ -28,10 +28,10 @@ async def count_total_user_active(request: DashboardRequest):
     try:
         logger.info(f"count_total_user_active at {datetime.now()}")
         mess = await user_service.count_total_user_active(request.end_date, request.locality)
-        logger.info(f"count_total_user_active success at {datetime.now()}")
+        logger.info(f"count_total_user_active success at {datetime.now()} {mess}")
         if mess is None:
             mess = 0
-        res = DashboardResponse(quantity=len(mess))
+        res = DashboardResponse(quantity=mess)
         return ResponseModel.success(content=res)
     except Exception as e:
         logger.error(traceback.format_exc())
@@ -43,10 +43,10 @@ async def count_new_user_active(request: DashboardRequest):
     try:
         logger.info(f"count_new_user_active at {datetime.now()}")
         mess = await user_service.count_new_user_active(request.start_date, request.end_date, request.locality)
-        logger.info(f"count_new_user_active success at {datetime.now()}")
+        logger.info(f"count_new_user_active success at {datetime.now()} {mess}")
         if mess is None:
             mess = 0
-        res = DashboardResponse(quantity=len(mess))
+        res = DashboardResponse(quantity=mess)
         return ResponseModel.success(content=res)
     except Exception as e:
         logger.error(traceback.format_exc())
@@ -61,10 +61,10 @@ async def count_total_order(request: DashboardRequest):
     try:
         logger.info(f"count_total_order at {datetime.now()}")
         mess = await cert_order_service.count_total_cert_order(request.end_date, request.locality)
-        logger.info(f"count_total_order success at {datetime.now()}")
+        logger.info(f"count_total_order success at {datetime.now()} {mess}")
         if mess is None:
             mess = 0
-        res = DashboardResponse(quantity=len(mess))
+        res = DashboardResponse(quantity=mess)
         return ResponseModel.success(content=res)
     except Exception as e:
         logger.error(traceback.format_exc())
@@ -76,10 +76,10 @@ async def count_new_order(request: DashboardRequest):
     try:
         logger.info(f"count_new_order at {datetime.now()}")
         mess = await cert_order_service.count_new_cert_order(request.start_date, request.end_date, request.locality)
-        logger.info(f"count_new_order success at {datetime.now()}")
+        logger.info(f"count_new_order success at {datetime.now()} {mess}")
         if mess is None:
             mess = 0
-        res = DashboardResponse(quantity=len(mess))
+        res = DashboardResponse(quantity=mess)
         return ResponseModel.success(content=res)
     except Exception as e:
         logger.error(traceback.format_exc())
@@ -94,10 +94,10 @@ async def count_total_credential(request: DashboardRequest):
     try:
         logger.info(f"count_total_credential at {datetime.now()}")
         mess = await credential_service.count_total_credential(request.end_date, request.locality)
-        logger.info(f"count_total_credential success at {datetime.now()}")
+        logger.info(f"count_total_credential success at {datetime.now()} {mess}")
         if mess is None:
             mess = 0
-        res = DashboardResponse(quantity=len(mess))
+        res = DashboardResponse(quantity=mess)
         return ResponseModel.success(content=res)
     except Exception as e:
         logger.error(traceback.format_exc())
@@ -112,7 +112,7 @@ async def count_new_credential(request: DashboardRequest):
         logger.info(f"count_new_credential success at {datetime.now()}: {mess}")
         if mess is None:
             mess = 0
-        res = DashboardResponse(quantity=len(mess))
+        res = DashboardResponse(quantity=mess)
         return ResponseModel.success(content=res)
     except Exception as e:
         logger.error(traceback.format_exc())
@@ -129,7 +129,7 @@ async def count_signature_transaction_by_time(request: DashboardRequest):
         logger.info(f"count_signature_transaction_by_time at {datetime.now()}")
         mess = await signature_transaction_service.count_total_signature_transaction(request.start_date,
                                                                                      request.end_date, request.by_type)
-        logger.info(f"count_signature_transaction_by_time success at {datetime.now()}")
+        logger.info(f"count_signature_transaction_by_time success at {datetime.now()} {mess}")
         if mess is None:
             return ResponseModel.not_found()
         return ResponseModel.success(content=mess)

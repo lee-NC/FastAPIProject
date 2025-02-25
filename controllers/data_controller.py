@@ -1,6 +1,7 @@
 import traceback
 from fastapi import HTTPException, APIRouter
-from processing.load_fact_tables import process_fetch_tables
+from processing.load_fact_tables import process_fetch_tables_hbase
+from processing.fetch_datas import process_fetch_tables
 from processing.transfer_data import cut_off_data
 from model.request_dto import *
 from model.response_dto import ResponseModel
@@ -8,6 +9,18 @@ import logging
 
 logger = logging.getLogger("Lakehouse")
 router = APIRouter(prefix="/data", tags=["Data"])
+
+
+@router.get("/fetch_data_hbase")
+async def fetch_data_hbase():
+    try:
+        logger.info(f"fetch_data_hbase at {datetime.datetime.now()}")
+        mess = await process_fetch_tables_hbase()
+        logger.info(f"fetch_data_hbase success at {datetime.datetime.now()}")
+        return ResponseModel.success(mess)
+    except Exception as e:
+        logger.error(traceback.format_exc())
+        return ResponseModel.error(str(e))
 
 
 @router.get("/fetch_data")

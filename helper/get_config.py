@@ -1,10 +1,11 @@
 import logging
 import traceback
-from pyhive import hive
 
 import happybase
 import pymongo
+import trino
 from hdfs import InsecureClient
+from pyhive import hive
 from pyspark.sql import SparkSession
 
 from helper.config import Config
@@ -90,6 +91,8 @@ def init_spark_connection():
              .config("spark.sql.catalog.iceberg.type", "hive")
              .config("spark.sql.catalog.hive.uri", "thrift://localhost:9083")
              .config("spark.sql.catalog.iceberg.warehouse", f'hdfs://{hdfs_info["name_node_host"]}:{hdfs_info["port"]}/{hdfs_info["data_dir"]}')
+             .config("spark.sql.shuffle.partitions", "200")
+             .config("spark.sql.execution.arrow.enabled", "true")
              .enableHiveSupport().getOrCreate())
     return spark
 
@@ -118,4 +121,15 @@ def init_hive_connection():
     hive_port = hive_config["port"]
     hive_schemas = hive_config["schema"]
     connection = hive.Connection(host=hive_uri, port=hive_port, database=hive_schemas, auth="NOSASL")
+    return connection
+
+
+def init_trino_connection():
+    task_config = config.get_config()
+    trino_config = task_config["trino"]
+    trino_uri = trino_config["uri"]
+    trino_port = trino_config["port"]
+    trino_catalog = trino_config["catalog"]
+    trino_schema = trino_config["schema"]
+    connection = trino.dbapi.connect(host=trino_uri, port=trino_port, catalog=trino_catalog, schema=trino_schema)
     return connection

@@ -9,7 +9,7 @@ from fastapi import FastAPI, Request
 from controllers import data_controller, report_controller, dashboard_controller
 from helper.config import Config
 from helper.custom_logging import setup_logging
-from processing.load_fact_tables import process_fetch_tables
+from processing.fetch_datas import process_fetch_tables
 
 sys.path.append(os.path.abspath("config"))
 sys.path.append(os.path.abspath("controllers"))
@@ -37,7 +37,7 @@ async def schedule_job():
 
 
 @asynccontextmanager
-async def lifespan():
+async def lifespan(app: FastAPI):
     await schedule_job()  # Khởi chạy task khi ứng dụng bắt đầu
     yield  # Đợi cho tới khi ứng dụng tắt
 
@@ -84,7 +84,8 @@ async def log_requests(request: Request, call_next):
 
 
 if __name__ == "__main__":
-    import uvicorn
-
+    # import uvicorn
+    #
     logger.info("Server is starting...")
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    # uvicorn.run(app, host="127.0.0.1", port=8000)
+    logger.info("Gunicorn đang khởi động FastAPI...")

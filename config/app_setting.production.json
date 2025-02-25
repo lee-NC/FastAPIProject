@@ -25,6 +25,12 @@
     "port": "10000",
     "schema": "iceberg_db"
   },
+  "trino": {
+    "uri": "localhost",
+    "port": "8083",
+    "catalog": "iceberg",
+    "schema": "lakehouse"
+  },
   "log": {
     "path": "/usr/local/log_lakehouse"
   }
