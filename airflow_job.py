@@ -6,7 +6,7 @@ from airflow.operators.python import PythonOperator
 
 sys.path.append(os.path.abspath("processing"))
 sys.path.append(os.path.abspath("helper"))
-from processing.load_fact_tables import process_fetch_tables
+from processing.load_fact_tables import process_fetch_tables_hbase
 from processing.process_report_tele_bot import *
 from processing.transfer_data import cut_off_data
 from helper.config import Config
@@ -20,7 +20,7 @@ logger = setup_logging(LOG_DIR)
 
 def run_fact_tables():
     # Chạy coroutine trong vòng lặp sự kiện
-    asyncio.run(process_fetch_tables())
+    asyncio.run(process_fetch_tables_hbase())
 
 
 def run_process_signature_transaction():

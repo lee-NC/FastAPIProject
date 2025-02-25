@@ -9,7 +9,7 @@ from fastapi import FastAPI, Request
 from controllers import data_controller, report_controller, dashboard_controller
 from helper.config import Config
 from helper.custom_logging import setup_logging
-from processing.load_fact_tables import process_fetch_tables
+from processing.load_fact_tables import process_fetch_tables_hbase
 
 sys.path.append(os.path.abspath("config"))
 sys.path.append(os.path.abspath("controllers"))
@@ -26,7 +26,7 @@ logger = setup_logging(LOG_DIR)
 
 def run_etl_fact_tables():
     # Chạy coroutine trong vòng lặp sự kiện
-    asyncio.run(process_fetch_tables())
+    asyncio.run(process_fetch_tables_hbase())
 
 
 async def schedule_job():

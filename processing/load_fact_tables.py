@@ -12,7 +12,7 @@ MAX_WORKERS = 4
 logger = logging.getLogger("Lakehouse")
 
 
-async def process_fetch_tables():
+async def process_fetch_tables_hbase():
     date_now = datetime.now()
     temp_time = f"{date_now.year}-{date_now.month}-{date_now.day - 1}T17:00:00.000Z"
     end_date = datetime.strptime(temp_time, "%Y-%m-%dT%H:%M:%S.%fZ")
