@@ -13,7 +13,7 @@ class CertOrderRepository(BaseRepository):
     def __init__(self):
         super().__init__("cert_order")
 
-    async def count_by_time_and_locality(self, start_date: datetime = None, end_date: datetime = None,
+    def count_by_time_and_locality(self, start_date: datetime = None, end_date: datetime = None,
                                          locality: str = None):
         """Đếm số lượng credential của user theo user_ids và trạng thái"""
         try:
@@ -36,7 +36,7 @@ class CertOrderRepository(BaseRepository):
                                  f"OR (year_created = {end_year} AND month_created <= {end_month}))")
             if locality:
                 query += f" AND locality_code = '{locality}'"
-            res = await self.fetch_all(query, as_dataframe=False)
+            res = self.fetch_all(query, as_dataframe=False)
             return res
         except Exception:
             logger.error(traceback.format_exc())

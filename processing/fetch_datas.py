@@ -3,15 +3,15 @@ import logging
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
-from itertools import islice
 
 from pyspark.sql.functions import col, expr, when, concat_ws, year, month
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, TimestampType, LongType, BooleanType, \
-    ArrayType, DoubleType, DecimalType
+    ArrayType, DecimalType
 
 from helper.get_config import init_connect_mongo, init_spark_connection
 
 CHUNK_SIZE = 500
+BATCH_SIZE = 5000
 MAX_WORKERS = 4
 MAX_FILE_SIZE = 536870912
 
@@ -34,6 +34,18 @@ async def load_data_identity(start_date, end_date):
         await load_user(node_name, start_date, end_date)
         await load_cert_order(node_name, start_date, end_date)
         await load_personal_turn_order(node_name, start_date, end_date)
+    except Exception as e:
+        logger.error(f"Bỏ qua bảng do lỗi: {str(e)}")
+        logger.error(traceback.format_exc())
+
+
+async def load_data_csc(start_date, end_date):
+    try:
+        node_name = "signservice_credential"
+        await load_credential(node_name, start_date, end_date)
+        # await load_cert(node_name, start_date, end_date)
+        await load_request_cert(node_name, start_date, end_date)
+        await load_signature_transaction(node_name, start_date, end_date)
     except Exception as e:
         logger.error(f"Bỏ qua bảng do lỗi: {str(e)}")
         logger.error(traceback.format_exc())
@@ -521,18 +533,6 @@ async def load_personal_turn_order(node_name, start_date, end_date):
     logger.info("Chuyển dữ liệu PersonalSignTurnOrder thành công từ MongoDB sang iceberg.")
 
 
-async def load_data_csc(start_date, end_date):
-    try:
-        node_name = "signservice_credential"
-        await load_credential(node_name, start_date, end_date)
-        # await load_cert(node_name, start_date, end_date)
-        await load_request_cert(node_name, start_date, end_date)
-        await load_signature_transaction(node_name, start_date, end_date)
-    except Exception as e:
-        logger.error(f"Bỏ qua bảng do lỗi: {str(e)}")
-        logger.error(traceback.format_exc())
-
-
 async def load_credential(node_name, start_date, end_date):
     collection, mongo_client = init_connect_mongo(node_name, "Credential")
     try:
@@ -759,8 +759,8 @@ async def _get_cut_off_name(node_name, table_name, start_date, end_date):
                 {'sourceCollection': table_name}]})
 
         for document in documents:
-            collectionName = str(document.get("collectionName", ""))
-            all_data.append(collectionName)
+            collection_name = str(document.get("collectionName", ""))
+            all_data.append(collection_name)
         logger.info(f"Get table name cut off table {table_name} from MongoDB.")
     except Exception as e:
         logger.error(f"Lỗi khi xử lý bảng SignatureTransaction: {str(e)}")
@@ -809,26 +809,20 @@ async def load_signature_transaction(node_name, start_date, end_date):
         logger.error(traceback.format_exc())
 
 
-def _chunked_iterable(iterable, size):
-    it = iter(iterable)
-    while chunk := list(islice(it, size)):
-        yield chunk
-
-
 async def _process_chunks(schema, collection_name, documents):
     try:
+        data = list(documents)
+        documents_iter = [data[i:i + BATCH_SIZE] for i in range(0, len(data), BATCH_SIZE)]
 
-        documents_iter = _chunked_iterable(documents, CHUNK_SIZE)
-
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            loop = asyncio.get_running_loop()
-            tasks = [loop.run_in_executor(executor, _transfer_chunk_sync, chunk, schema, collection_name)
-                     for chunk in documents_iter]
-
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS):
+            tasks = [
+                await asyncio.to_thread(_transfer_chunk_sync, chunk, schema, collection_name)
+                for chunk in documents_iter
+            ]
             if tasks:
                 await asyncio.gather(*tasks)
 
-        logger.info(f"Chuyển {collection_name} thành công từ MongoDB sang HBase.")
+        logger.info(f"Chuyển {len(data)} bảng ghi đến bảng {collection_name} thành công từ MongoDB sang HBase.")
     except Exception as e:
         logger.error(f"Lỗi khi xử lý bảng {collection_name}: {str(e)}")
         logger.error(traceback.format_exc())
@@ -881,7 +875,7 @@ async def _transfer_signature_transaction(chunk, schema):
             col("finishDate").cast("timestamp").alias("finish_date"),
             col("tranTypeDesc").alias("trans_type_desc"),
             col("tranType").cast(IntegerType()).alias("trans_type"),
-            col("executeTime").alias("execute_time"),
+            col("executeTime").cast(DecimalType(10, 4)).alias("execute_time"),
             col("appId").alias("app_id"),
             col("appName").alias("app_name"),
             col("tranCode").alias("trans_code")
@@ -1256,7 +1250,7 @@ async def _transfer_credential(chunk):
             ).otherwise(col("pricingCode")).alias("pricing_code"),
             when(
                 (col("pricingCode") == "17187") &
-                col("pricingName").isin(pricing_ps0),
+                (col("pricingName").isin(pricing_ps0)),
                 "SmartCA cá nhân PS0 (Công dân)"
             ).otherwise(col("pricingName")).alias("pricing_name"),
             when(
