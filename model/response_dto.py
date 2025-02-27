@@ -1,5 +1,6 @@
 from datetime import datetime
 
+import pandas as pd
 from pydantic import BaseModel
 from typing import Optional, Any
 
@@ -13,6 +14,8 @@ class ResponseModel(BaseModel):
     @classmethod
     def success(cls, mess: str = "", content: Optional[Any] = None):
         """ Trả về response thành công """
+        if isinstance(content, pd.DataFrame):
+            content = content.to_dict(orient="records")
         return cls(code=0, codeDesc="SUCCESS", message=mess, content=content)
 
     @classmethod

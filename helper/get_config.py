@@ -91,9 +91,17 @@ def init_spark_connection():
              .config("spark.sql.catalog.iceberg.type", "hive")
              .config("spark.sql.catalog.hive.uri", "thrift://localhost:9083")
              .config("spark.sql.catalog.iceberg.warehouse", f'hdfs://{hdfs_info["name_node_host"]}:{hdfs_info["port"]}/{hdfs_info["data_dir"]}')
-             .config("spark.sql.shuffle.partitions", "300")
+             .config("spark.sql.shuffle.partitions", "20")
              .config("spark.sql.adaptive.enabled", "true")
-             .config("spark.sql.adaptive.shuffle.targetPostShuffleInputSize", "512MB")
+             .config("spark.sql.adaptive.advisoryPartitionSizeInBytes", "64m")
+             .config("spark.default.parallelism", "16")
+             .config("spark.executor.memory", "3g")
+             .config("spark.executor.cores", "2")
+             .config("spark.driver.memory", "4g")
+             .config("spark.dynamicAllocation.enabled", "true")
+             .config("spark.dynamicAllocation.minExecutors", "2")
+             .config("spark.dynamicAllocation.maxExecutors", "4")
+             .config("spark.executor.extraJavaOptions", "-XX:+UseG1GC -XX:InitiatingHeapOccupancyPercent=35")
              .enableHiveSupport().getOrCreate())
     return spark
 
@@ -104,14 +112,14 @@ def init_spark_mongodb_connection(spark, node_name, collection_name, pipeline):
     mongo_uri = mongo["uri"]
     mongo_uri = str.replace(mongo_uri, "{NODE_NAME}", node_name)
     mongo_uri = str.replace(mongo_uri, "{NODE_REP}", str.replace(node_name, "_", ""))
-    mongo_df_info = spark.read.format("com.mongodb.spark.sql.DefaultSource") \
-        .option("uri", mongo_uri) \
-        .option("pipeline", pipeline) \
-        .option("partitioner", "MongoPaginateBySizePartitioner") \
-        .option("batchSize", CHUNK_SIZE) \
-        .option("database", node_name) \
-        .option("collection", collection_name) \
-        .load()
+    mongo_df_info = (spark.read.format("com.mongodb.spark.sql.DefaultSource")
+                     .option("uri", mongo_uri)
+                     .option("pipeline", pipeline)
+                     .option("partitioner", "MongoPaginateBySizePartitioner")
+                     .option("batchSize", CHUNK_SIZE)
+                     .option("database", node_name)
+                     .option("collection", collection_name)
+                     .load())
     return mongo_df_info
 
 
