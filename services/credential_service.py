@@ -11,26 +11,26 @@ class CredentialService:
     def __init__(self):
         self.credential_repo = CredentialRepository()
 
-    async def get_credential(self, credential_id):
+    def get_credential(self, credential_id):
         """Gọi repository để lấy credential by id"""
-        return await self.credential_repo.get_by_id(credential_id)
+        return self.credential_repo.get_by_id(credential_id)
 
-    async def create_credential(self, credential_id, credential_data):
+    def create_credential(self, credential_id, credential_data):
         """Gọi repository để tạo credential"""
-        return await self.credential_repo.insert(credential_id, credential_data)
+        return self.credential_repo.insert(credential_id, credential_data)
 
-    async def count_total_credential(self, end_date: datetime, locality: str):
+    def count_total_credential(self, end_date: datetime, locality: str):
         try:
-            res = await self.credential_repo.count_valid_credential(None, end_date, locality)
+            res = self.credential_repo.count_valid_credential(None, end_date, locality)
             return res
         except Exception as e:
             logger.error(f"Error count_total_credential: {str(e)}")
             logger.error(traceback.format_exc())
         return 0
 
-    async def count_new_credential(self, start_date, end_date, locality):
+    def count_new_credential(self, start_date, end_date, locality):
         try:
-            return await self.credential_repo.count_valid_credential(start_date, end_date, locality)
+            return self.credential_repo.count_valid_credential(start_date, end_date, locality)
         except Exception as e:
             logger.error(f"Error count_total_credential: {str(e)}")
             logger.error(traceback.format_exc())

@@ -91,6 +91,9 @@ def init_spark_connection():
              .config("spark.sql.catalog.iceberg.type", "hive")
              .config("spark.sql.catalog.hive.uri", "thrift://localhost:9083")
              .config("spark.sql.catalog.iceberg.warehouse", f'hdfs://{hdfs_info["name_node_host"]}:{hdfs_info["port"]}/{hdfs_info["data_dir"]}')
+             .config("spark.sql.shuffle.partitions", "300")
+             .config("spark.sql.adaptive.enabled", "true")
+             .config("spark.sql.adaptive.shuffle.targetPostShuffleInputSize", "512MB")
              .enableHiveSupport().getOrCreate())
     return spark
 
@@ -129,5 +132,5 @@ def init_trino_connection():
     trino_port = trino_config["port"]
     trino_catalog = trino_config["catalog"]
     trino_schema = trino_config["schema"]
-    connection = trino.dbapi.connect(host=trino_uri, port=trino_port, catalog=trino_catalog, schema=trino_schema)
+    connection = trino.dbapi.connect(host=trino_uri, port=trino_port, user="vnpt", catalog=trino_catalog, schema=trino_schema)
     return connection

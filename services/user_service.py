@@ -13,18 +13,18 @@ class UserService:
     def __init__(self):
         self.user_repo = UserRepository()
 
-    async def get_user(self, user_id):
+    def get_user(self, user_id):
         """Gọi repository để lấy user by id"""
-        return await self.user_repo.get_by_id(user_id)
+        return self.user_repo.get_by_id(user_id)
 
-    async def create_user(self, user_id, user_data):
+    def create_user(self, user_id, user_data):
         """Gọi repository để tạo user"""
-        return await self.user_repo.insert(user_id, user_data)
+        return self.user_repo.insert(user_id, user_data)
 
-    async def count_total_user_active(self, end_date: datetime, locality: str):
+    def count_total_user_active(self, end_date: datetime, locality: str):
         """Đếm user hoạt động"""
         try:
-            valid_users = await self.user_repo.get_active_user_ids(None, end_date, locality)
+            valid_users = self.user_repo.get_active_user_ids(None, end_date, locality)
             return valid_users
 
         except Exception as e:
@@ -32,9 +32,9 @@ class UserService:
             logger.error(traceback.format_exc())
         return 0
 
-    async def count_new_user_active(self, start_date: datetime, end_date: datetime, locality: str):
+    def count_new_user_active(self, start_date: datetime, end_date: datetime, locality: str):
         try:
-            valid_users = await self.user_repo.get_active_user_ids(start_date, end_date, locality)
+            valid_users = self.user_repo.get_active_user_ids(start_date, end_date, locality)
             return valid_users
 
         except Exception as e:

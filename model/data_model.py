@@ -123,19 +123,3 @@ class Locality:
                 f"district_id={self.district_id}, district_name={self.district_name}, district_id_my_vnpt={self.district_id_my_vnpt}, "
                 f"ward_id={self.ward_id}, ward_name={self.ward_name}, ward_id_my_vnpt={self.ward_id_my_vnpt}, co_tuyen_thu={self.co_tuyen_thu})")
 
-
-class DashboardResponse:
-
-    def __init__(self, app_name="", quantity=0, locality="", account_type="", source="", month="", day=""):
-        super().__init__()
-        self.app_name = app_name
-        self.quantity = quantity
-        self.locality = locality
-        self.account_type = account_type
-        self.source = source
-        self.month = month
-        self.day = day
-
-    def __repr__(self):
-        return (f"DashboardResponse(app_name={self.app_name}, quantity={self.quantity}, locality={self.locality},"
-                f"account_type={self.account_type}, source={self.source}, month={self.month}, day={self.day})")

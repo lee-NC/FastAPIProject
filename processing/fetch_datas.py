@@ -5,11 +5,13 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
 from pyspark.sql.functions import col, expr, when, concat_ws, year, month
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType, TimestampType, LongType, BooleanType, ArrayType
+from pyspark.sql.types import StructType, StructField, StringType, IntegerType, TimestampType, LongType, BooleanType, \
+    ArrayType, DecimalType
 
 from helper.get_config import init_connect_mongo, init_spark_connection
 
 CHUNK_SIZE = 500
+BATCH_SIZE = 5000
 MAX_WORKERS = 4
 MAX_FILE_SIZE = 536870912
 
@@ -32,6 +34,18 @@ async def load_data_identity(start_date, end_date):
         await load_user(node_name, start_date, end_date)
         await load_cert_order(node_name, start_date, end_date)
         await load_personal_turn_order(node_name, start_date, end_date)
+    except Exception as e:
+        logger.error(f"Bỏ qua bảng do lỗi: {str(e)}")
+        logger.error(traceback.format_exc())
+
+
+async def load_data_csc(start_date, end_date):
+    try:
+        node_name = "signservice_credential"
+        await load_credential(node_name, start_date, end_date)
+        # await load_cert(node_name, start_date, end_date)
+        await load_request_cert(node_name, start_date, end_date)
+        await load_signature_transaction(node_name, start_date, end_date)
     except Exception as e:
         logger.error(f"Bỏ qua bảng do lỗi: {str(e)}")
         logger.error(traceback.format_exc())
@@ -181,7 +195,7 @@ async def load_cert_order(node_name, start_date, end_date):
         logger.error(traceback.format_exc())
     finally:
         mongo_client.close()
-    logger.info("Chuyển dữ liệu CertOrder thành công từ MongoDB sang HBase.")
+    logger.info("Chuyển dữ liệu CertOrder thành công từ MongoDB sang iceberg.")
 
 
 async def _transfer_cert_order(chunk, schema):
@@ -233,7 +247,6 @@ async def _transfer_cert_order(chunk, schema):
             col("street_name").alias("street_name"),
             col("address").alias("address_detail")
         )
-        df_transformed.logger.infoSchema()
         df_transformed = (df_transformed.withColumn("year_created", year(col("created_date")))
                           .withColumn("month_created", month(col("created_date"))))
         df_transformed.createOrReplaceTempView("new_data")
@@ -372,7 +385,7 @@ async def load_user(node_name, start_date, end_date):
         logger.error(traceback.format_exc())
     finally:
         mongo_client.close()
-    logger.info("Chuyển dữ liệu User thành công từ MongoDB sang HBase.")
+    logger.info("Chuyển dữ liệu User thành công từ MongoDB sang iceberg.")
 
 
 async def load_register(node_name, start_date, end_date):
@@ -436,7 +449,7 @@ async def load_register(node_name, start_date, end_date):
         logger.error(traceback.format_exc())
     finally:
         mongo_client.close()
-    logger.info("Chuyển dữ liệu Register thành công từ MongoDB sang HBase.")
+    logger.info("Chuyển dữ liệu Register thành công từ MongoDB sang iceberg.")
 
 
 async def load_personal_turn_order(node_name, start_date, end_date):
@@ -517,19 +530,7 @@ async def load_personal_turn_order(node_name, start_date, end_date):
         logger.error(traceback.format_exc())
     finally:
         mongo_client.close()
-    logger.info("Chuyển dữ liệu PersonalSignTurnOrder thành công từ MongoDB sang HBase.")
-
-
-async def load_data_csc(start_date, end_date):
-    try:
-        node_name = "signservice_credential"
-        await load_credential(node_name, start_date, end_date)
-        await load_cert(node_name, start_date, end_date)
-        await load_request_cert(node_name, start_date, end_date)
-        await load_signature_transaction(node_name, start_date, end_date)
-    except Exception as e:
-        logger.error(f"Bỏ qua bảng do lỗi: {str(e)}")
-        logger.error(traceback.format_exc())
+    logger.info("Chuyển dữ liệu PersonalSignTurnOrder thành công từ MongoDB sang iceberg.")
 
 
 async def load_credential(node_name, start_date, end_date):
@@ -613,7 +614,7 @@ async def load_credential(node_name, start_date, end_date):
         logger.error(traceback.format_exc())
     finally:
         mongo_client.close()
-    logger.info("Chuyển dữ liệu Credential thành công từ MongoDB sang HBase.")
+    logger.info("Chuyển dữ liệu Credential thành công từ MongoDB sang iceberg.")
 
 
 async def load_request_cert(node_name, start_date, end_date):
@@ -691,7 +692,7 @@ async def load_request_cert(node_name, start_date, end_date):
         logger.error(traceback.format_exc())
     finally:
         mongo_client.close()
-    logger.info("Chuyển dữ liệu RequestCert thành công từ MongoDB sang HBase.")
+    logger.info("Chuyển dữ liệu RequestCert thành công từ MongoDB sang iceberg.")
 
 
 async def load_cert(node_name, start_date, end_date):
@@ -733,7 +734,7 @@ async def load_cert(node_name, start_date, end_date):
         logger.error(traceback.format_exc())
     finally:
         mongo_client.close()
-    logger.info("Chuyển dữ liệu Cert thành công từ MongoDB sang HBase.")
+    logger.info("Chuyển dữ liệu Cert thành công từ MongoDB sang iceberg.")
 
 
 async def _get_cut_off_name(node_name, table_name, start_date, end_date):
@@ -758,8 +759,8 @@ async def _get_cut_off_name(node_name, table_name, start_date, end_date):
                 {'sourceCollection': table_name}]})
 
         for document in documents:
-            collectionName = str(document.get("collectionName", ""))
-            all_data.append(collectionName)
+            collection_name = str(document.get("collectionName", ""))
+            all_data.append(collection_name)
         logger.info(f"Get table name cut off table {table_name} from MongoDB.")
     except Exception as e:
         logger.error(f"Lỗi khi xử lý bảng SignatureTransaction: {str(e)}")
@@ -775,47 +776,32 @@ async def load_signature_transaction(node_name, start_date, end_date):
         table_names = await _get_cut_off_name(node_name, table_name, start_date, end_date)
         for name in table_names:
             collection, mongo_client = init_connect_mongo(node_name, name)
-            query = [
-                {
-                    '$match': {
-                        '$and': [
-                            {
-                                'finishDate': {
-                                    '$gte': start_date
-                                }
-                            }, {
-                                'finishDate': {
-                                    '$lt': end_date
-                                }
-                            }
-                        ]
-                    }
-                }, {
-                    '$project': {
-                        'credentialId': '$credentialId',
-                        'serial': '$certSerial',
-                        'identityId': '$identityId',
-                        'uid': '$identityUid',
-                        'fullName': '$identityName',
-                        'email': '$identityEmail',
-                        'status': '$status',
-                        'statusDesc': '$statusDesc',
-                        'reqTime': '$reqTime',
-                        'expiredTime': '$expireTime',
-                        'finishDate': '$finishDate',
-                        'tranTypeDesc': '$tranTypeDesc',
-                        'tranType': '$tranType',
-                        'executeTime': '$excuteTime',
-                        'appId': '$appId',
-                        'appName': '$appName',
-                        'tranCode': '$tranCode'
-                    }
-                }
-            ]
-            documents = collection.aggregate(query).batch_size(CHUNK_SIZE)
-
+            documents = collection.find({'$and': [
+                {'expiredTime': {'$gte': start_date}},
+                {'expiredTime': {'$lt': end_date}}]},
+                no_cursor_timeout=True).batch_size(CHUNK_SIZE)
+            schema = StructType([
+                StructField("_id", StringType(), True),
+                StructField("credentialId", StringType(), True),
+                StructField("certSerial", StringType(), True),
+                StructField("identityId", StringType(), True),
+                StructField("identityUid", StringType(), True),
+                StructField("identityName", StringType(), True),
+                StructField("identityEmail", StringType(), True),
+                StructField("status", IntegerType(), True),
+                StructField("statusDesc", StringType(), True),
+                StructField("reqTime", TimestampType(), True),
+                StructField("expiredTime", TimestampType(), True),
+                StructField("finishDate", TimestampType(), True),
+                StructField("tranTypeDesc", StringType(), True),
+                StructField("tranType", IntegerType(), True),
+                StructField("executeTime", DecimalType(10, 4), True),
+                StructField("appId", StringType(), True),
+                StructField("appName", StringType(), True),
+                StructField("tranCode", StringType(), True)
+            ])
             # Xử lý song song bất đồng bộ
-            await _process_chunks(None, "SignatureTransaction", documents)
+            await _process_chunks(schema, "SignatureTransaction", documents)
             mongo_client.close()
 
     except Exception as e:
@@ -825,23 +811,18 @@ async def load_signature_transaction(node_name, start_date, end_date):
 
 async def _process_chunks(schema, collection_name, documents):
     try:
-        loop = asyncio.get_running_loop()
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            chunk = []
-            i = 0
+        data = list(documents)
+        documents_iter = [data[i:i + BATCH_SIZE] for i in range(0, len(data), BATCH_SIZE)]
 
-            for document in documents:
-                chunk.append(document)
-                i += 1
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS):
+            tasks = [
+                await asyncio.to_thread(_transfer_chunk_sync, chunk, schema, collection_name)
+                for chunk in documents_iter
+            ]
+            if tasks:
+                await asyncio.gather(*tasks)
 
-                if len(chunk) >= CHUNK_SIZE:
-                    loop.run_in_executor(executor, _transfer_chunk_sync, chunk[:], schema, collection_name)
-                    chunk.clear()
-
-            if chunk:
-                loop.run_in_executor(executor, _transfer_chunk_sync, chunk, schema, collection_name)
-
-        logger.info(f"Chuyển {i} bản ghi {collection_name} thành công từ MongoDB sang HBase.")
+        logger.info(f"Chuyển {len(data)} bảng ghi đến bảng {collection_name} thành công từ MongoDB sang HBase.")
     except Exception as e:
         logger.error(f"Lỗi khi xử lý bảng {collection_name}: {str(e)}")
         logger.error(traceback.format_exc())
@@ -865,7 +846,7 @@ async def _transfer_chunk_sync(chunk, schema, collection_name):
             case "Credential":
                 await _transfer_credential(chunk)
             case "SignatureTransaction":
-                await _transfer_signature_transaction(chunk)
+                await _transfer_signature_transaction(chunk, schema)
             case _:
                 logger.info(f"Bảng {collection_name} không được nhận diện.")
                 return None
@@ -874,27 +855,27 @@ async def _transfer_chunk_sync(chunk, schema, collection_name):
         logger.error(traceback.format_exc())
 
 
-async def _transfer_signature_transaction(chunk):
+async def _transfer_signature_transaction(chunk, schema):
     spark = init_spark_connection()
     try:
-        df = spark.createDataFrame(chunk)
-        df.logger.infoSchema()
+        df = spark.createDataFrame(chunk, schema)
         # Select và cast các cột
         df_transformed = df.select(
             col("_id").alias("id"),
-            col("serial").alias("serial"),
+            col("certSerial").alias("serial"),
             col("credentialId").alias("credential_id"),
             col("identityId").alias("identity_id"),
-            col("uid").alias("uid"),
-            col("fullName").alias("full_name"),
-            col("email").alias("email"),
+            col("identityUid").alias("uid"),
+            col("identityName").alias("full_name"),
+            col("identityEmail").alias("email"),
             col("status").cast(IntegerType()).alias("status"),
             col("statusDesc").alias("status_desc"),
             col("reqTime").cast("timestamp").alias("req_time"),
+            col("expiredTime").cast("timestamp").alias("expired_time"),
             col("finishDate").cast("timestamp").alias("finish_date"),
             col("tranTypeDesc").alias("trans_type_desc"),
             col("tranType").cast(IntegerType()).alias("trans_type"),
-            col("executeTime").alias("execute_time"),
+            col("executeTime").cast(DecimalType(10, 4)).alias("execute_time"),
             col("appId").alias("app_id"),
             col("appName").alias("app_name"),
             col("tranCode").alias("trans_code")
@@ -920,7 +901,7 @@ async def _transfer_register(chunk):
     spark = init_spark_connection()
     try:
         df = spark.createDataFrame(chunk)
-        df.logger.infoSchema()
+
         # Select và cast các cột
         df_transformed = df.select(
             col("_id").alias("id"),
@@ -933,8 +914,10 @@ async def _transfer_register(chunk):
             col("createdDate").cast("timestamp").alias("created_date"),
             col("modifiedDate").cast("timestamp").alias("modified_date"),
             col("source").cast(IntegerType()).alias("source"),
-            when(col("provinceId").isNotNull(), col("provinceId").cast(IntegerType())).otherwise(0).alias("province_id"),
-            when(col("districtId").isNotNull(), col("districtId").cast(IntegerType())).otherwise(0).alias("district_id"),
+            when(col("provinceId").isNotNull(), col("provinceId").cast(IntegerType())).otherwise(0).alias(
+                "province_id"),
+            when(col("districtId").isNotNull(), col("districtId").cast(IntegerType())).otherwise(0).alias(
+                "district_id"),
             when(col("districtId").isNotNull(), col("districtId").cast(IntegerType())).otherwise(0).alias("ward_id"),
             col("streetName").alias("street_name"),
             col("address").alias("address")
@@ -980,9 +963,13 @@ async def _transfer_user(chunk, schema):
             "province_codes",
             concat_ws(",", "province_codes")
         )
-        df = (df.withColumn("province_id", when(col("province_id").rlike("^[0-9]+$"), col("province_id").cast(IntegerType())).otherwise(0))
-              .withColumn("district_id", when(col("district_id").rlike("^[0-9]+$"), col("district_id").cast(IntegerType())).otherwise(0))
-              .withColumn("ward_id", when(col("ward_id").rlike("^[0-9]+$"), col("ward_id").cast(IntegerType())).otherwise(0)))
+        df = (df.withColumn("province_id", when(col("province_id").rlike("^[0-9]+$"),
+                                                col("province_id").cast(IntegerType())).otherwise(0))
+              .withColumn("district_id",
+                          when(col("district_id").rlike("^[0-9]+$"), col("district_id").cast(IntegerType())).otherwise(
+                              0))
+              .withColumn("ward_id",
+                          when(col("ward_id").rlike("^[0-9]+$"), col("ward_id").cast(IntegerType())).otherwise(0)))
 
         df_transformed = df.select(
             col("_id").alias("id"),
@@ -1126,7 +1113,7 @@ async def _transfer_request_cert(chunk):
     spark = init_spark_connection()
     try:
         df = spark.createDataFrame(chunk)
-        df.logger.infoSchema()
+
         # Select và cast các cột
         df_transformed = df.select(
             col("_id").alias("id"),
@@ -1163,12 +1150,22 @@ async def _transfer_request_cert(chunk):
             ).otherwise(""))
         df_transformed = (df_transformed.withColumn("year_created", year(col("created_date")))
                           .withColumn("month_created", month(col("created_date"))))
-        table_names = "iceberg.lakehouse.request_cert"
-        (df_transformed.write.format("iceberg")
-         .mode("append")
-         .partitionBy('status', 'locality_code', 'type', 'year_created', 'month_created')
-         .option("target-file-size-bytes", MAX_FILE_SIZE)
-         .saveAsTable(table_names))
+        df_transformed.createOrReplaceTempView("new_data")
+        spark.sql("""
+                    MERGE INTO iceberg.lakehouse.request_cert AS target
+                USING (SELECT * FROM new_data) AS source
+                ON target.id = source.id
+                WHEN MATCHED THEN 
+                        UPDATE SET 
+                        target.status = source.status,
+                        target.modified_date = source.modified_date,
+                        target.status_desc = source.status_desc,
+                        target.log_time = source.log_time,
+                        target.log_action = source.log_action,
+                        target.log_content = source.log_content
+                WHEN NOT MATCHED THEN 
+                    INSERT * 
+                    """)
         logger.info(f"Batch với {len(chunk)} bản ghi đã được xử lý.")
     except Exception as e:
         logger.error(f"Lỗi trong quá trình xử lý batch: {str(e)}")
@@ -1181,7 +1178,7 @@ async def _transfer_cert(chunk):
     spark = init_spark_connection()
     try:
         df = spark.createDataFrame(chunk)
-        df.logger.infoSchema()
+
         # Select và cast các cột
         df_transformed = df.select(
             col("_id").alias("id"),
@@ -1253,7 +1250,7 @@ async def _transfer_credential(chunk):
             ).otherwise(col("pricingCode")).alias("pricing_code"),
             when(
                 (col("pricingCode") == "17187") &
-                col("pricingName").isin(pricing_ps0),
+                (col("pricingName").isin(pricing_ps0)),
                 "SmartCA cá nhân PS0 (Công dân)"
             ).otherwise(col("pricingName")).alias("pricing_name"),
             when(

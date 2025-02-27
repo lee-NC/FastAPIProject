@@ -35,3 +35,12 @@ class ResponseModel(BaseModel):
         """ Trả về response khi request quá thời gian """
         return cls(code=500, codeDesc="SERVER_ERROR", message=message, content=None)
 
+
+class DashboardResponse(BaseModel):
+    app_name: str = ""
+    quantity: int = 0
+    locality: str = ""
+    account_type: str = ""
+    source: str = ""
+    month: str = ""
+    day: str = ""

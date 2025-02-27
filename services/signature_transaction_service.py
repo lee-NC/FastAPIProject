@@ -13,14 +13,14 @@ class SignatureTransactionService:
     def __init__(self):
         self.signature_transaction_repo = SignatureTransactionRepository()
 
-    async def get_signature_transaction(self, signature_transaction_id):
+    def get_signature_transaction(self, signature_transaction_id):
         """Gọi repository để lấy signature_transaction by id"""
-        return await self.signature_transaction_repo.get_by_id(signature_transaction_id)
+        return self.signature_transaction_repo.get_by_id(signature_transaction_id)
 
-    async def count_total_signature_transaction(self, start_date: datetime, end_date: datetime, by_app: bool = False):
+    def count_total_signature_transaction(self, start_date: datetime, end_date: datetime, by_app: bool = False):
         """Đếm signature_transaction hoạt động"""
         try:
-            result = await self.signature_transaction_repo.get_total_signature_by_time(start_date, end_date, by_app)
+            result = self.signature_transaction_repo.get_total_signature_by_time(start_date, end_date, by_app)
             return result
 
         except Exception as e:

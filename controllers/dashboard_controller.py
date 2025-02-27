@@ -9,7 +9,7 @@ from services.signature_transaction_service import SignatureTransactionService
 from services.user_service import UserService
 from model.request_dto import DashboardRequest
 from model.response_dto import ResponseModel
-from model.data_model import DashboardResponse
+from model.response_dto import DashboardResponse
 import logging
 
 logger = logging.getLogger("Lakehouse")
@@ -24,14 +24,14 @@ signature_transaction_service = SignatureTransactionService()
 # region user
 
 @router.post("/count_total_user_active")
-async def count_total_user_active(request: DashboardRequest):
+def count_total_user_active(request: DashboardRequest):
     try:
         logger.info(f"count_total_user_active at {datetime.now()}")
-        mess = await user_service.count_total_user_active(request.end_date, request.locality)
-        logger.info(f"count_total_user_active success at {datetime.now()}")
+        mess = user_service.count_total_user_active(request.end_date, request.locality)
+        logger.info(f"count_total_user_active success at {datetime.now()} {mess}")
         if mess is None:
             mess = 0
-        res = DashboardResponse(quantity=len(mess))
+        res = DashboardResponse(quantity=mess)
         return ResponseModel.success(content=res)
     except Exception as e:
         logger.error(traceback.format_exc())
@@ -39,14 +39,14 @@ async def count_total_user_active(request: DashboardRequest):
 
 
 @router.post("/count_new_user_active")
-async def count_new_user_active(request: DashboardRequest):
+def count_new_user_active(request: DashboardRequest):
     try:
         logger.info(f"count_new_user_active at {datetime.now()}")
-        mess = await user_service.count_new_user_active(request.start_date, request.end_date, request.locality)
-        logger.info(f"count_new_user_active success at {datetime.now()}")
+        mess = user_service.count_new_user_active(request.start_date, request.end_date, request.locality)
+        logger.info(f"count_new_user_active success at {datetime.now()} {mess}")
         if mess is None:
             mess = 0
-        res = DashboardResponse(quantity=len(mess))
+        res = DashboardResponse(quantity=mess)
         return ResponseModel.success(content=res)
     except Exception as e:
         logger.error(traceback.format_exc())
@@ -57,14 +57,14 @@ async def count_new_user_active(request: DashboardRequest):
 
 # region order
 @router.post("/count_total_order")
-async def count_total_order(request: DashboardRequest):
+def count_total_order(request: DashboardRequest):
     try:
         logger.info(f"count_total_order at {datetime.now()}")
-        mess = await cert_order_service.count_total_cert_order(request.end_date, request.locality)
-        logger.info(f"count_total_order success at {datetime.now()}")
+        mess = cert_order_service.count_total_cert_order(request.end_date, request.locality)
+        logger.info(f"count_total_order success at {datetime.now()} {mess}")
         if mess is None:
             mess = 0
-        res = DashboardResponse(quantity=len(mess))
+        res = DashboardResponse(quantity=mess)
         return ResponseModel.success(content=res)
     except Exception as e:
         logger.error(traceback.format_exc())
@@ -72,14 +72,14 @@ async def count_total_order(request: DashboardRequest):
 
 
 @router.post("/count_new_order")
-async def count_new_order(request: DashboardRequest):
+def count_new_order(request: DashboardRequest):
     try:
         logger.info(f"count_new_order at {datetime.now()}")
-        mess = await cert_order_service.count_new_cert_order(request.start_date, request.end_date, request.locality)
-        logger.info(f"count_new_order success at {datetime.now()}")
+        mess = cert_order_service.count_new_cert_order(request.start_date, request.end_date, request.locality)
+        logger.info(f"count_new_order success at {datetime.now()} {mess}")
         if mess is None:
             mess = 0
-        res = DashboardResponse(quantity=len(mess))
+        res = DashboardResponse(quantity=mess)
         return ResponseModel.success(content=res)
     except Exception as e:
         logger.error(traceback.format_exc())
@@ -90,14 +90,14 @@ async def count_new_order(request: DashboardRequest):
 
 # region cert
 @router.post("/count_total_credential")
-async def count_total_credential(request: DashboardRequest):
+def count_total_credential(request: DashboardRequest):
     try:
         logger.info(f"count_total_credential at {datetime.now()}")
-        mess = await credential_service.count_total_credential(request.end_date, request.locality)
-        logger.info(f"count_total_credential success at {datetime.now()}")
+        mess = credential_service.count_total_credential(request.end_date, request.locality)
+        logger.info(f"count_total_credential success at {datetime.now()} {mess}")
         if mess is None:
             mess = 0
-        res = DashboardResponse(quantity=len(mess))
+        res = DashboardResponse(quantity=mess)
         return ResponseModel.success(content=res)
     except Exception as e:
         logger.error(traceback.format_exc())
@@ -105,14 +105,14 @@ async def count_total_credential(request: DashboardRequest):
 
 
 @router.post("/count_new_credential")
-async def count_new_credential(request: DashboardRequest):
+def count_new_credential(request: DashboardRequest):
     try:
         logger.info(f"count_new_credential at {datetime.now()}")
-        mess = await credential_service.count_new_credential(request.start_date, request.end_date, request.locality)
+        mess = credential_service.count_new_credential(request.start_date, request.end_date, request.locality)
         logger.info(f"count_new_credential success at {datetime.now()}: {mess}")
         if mess is None:
             mess = 0
-        res = DashboardResponse(quantity=len(mess))
+        res = DashboardResponse(quantity=mess)
         return ResponseModel.success(content=res)
     except Exception as e:
         logger.error(traceback.format_exc())
@@ -124,12 +124,12 @@ async def count_new_credential(request: DashboardRequest):
 # region signature_transaction
 
 @router.post("/count_signature_transaction_by_time")
-async def count_signature_transaction_by_time(request: DashboardRequest):
+def count_signature_transaction_by_time(request: DashboardRequest):
     try:
         logger.info(f"count_signature_transaction_by_time at {datetime.now()}")
-        mess = await signature_transaction_service.count_total_signature_transaction(request.start_date,
+        mess = signature_transaction_service.count_total_signature_transaction(request.start_date,
                                                                                      request.end_date, request.by_type)
-        logger.info(f"count_signature_transaction_by_time success at {datetime.now()}")
+        logger.info(f"count_signature_transaction_by_time success at {datetime.now()} {mess}")
         if mess is None:
             return ResponseModel.not_found()
         return ResponseModel.success(content=mess)
