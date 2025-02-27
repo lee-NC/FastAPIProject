@@ -11,7 +11,7 @@ from pyspark.sql.types import StructType, StructField, StringType, IntegerType, 
 from helper.get_config import init_connect_mongo, init_spark_connection
 
 CHUNK_SIZE = 500
-BATCH_SIZE = 5000
+BATCH_SIZE = 2000
 MAX_WORKERS = 4
 MAX_FILE_SIZE = 536870912
 
@@ -822,7 +822,7 @@ async def _process_chunks(schema, collection_name, documents):
             if tasks:
                 await asyncio.gather(*tasks)
 
-        logger.info(f"Chuyển {len(data)} bảng ghi đến bảng {collection_name} thành công từ MongoDB sang HBase.")
+        logger.info(f"Chuyển {len(data)} bản ghi đến bảng {collection_name} thành công từ MongoDB sang HBase.")
     except Exception as e:
         logger.error(f"Lỗi khi xử lý bảng {collection_name}: {str(e)}")
         logger.error(traceback.format_exc())
@@ -927,16 +927,16 @@ async def _transfer_register(chunk):
         df_transformed.createOrReplaceTempView("new_data")
         spark.sql("""
                 MERGE INTO iceberg.lakehouse.register AS target
-            USING (SELECT * FROM new_data) AS source
-            ON target.id = source.id
-            WHEN MATCHED THEN 
+                USING (SELECT * FROM new_data) AS source
+                ON target.id = source.id
+                WHEN MATCHED THEN 
                     UPDATE SET 
-                    target.status = source.status,
-                    target.modified_date = source.modified_date,
-                    target.status_desc = source.status_desc
-            WHEN NOT MATCHED THEN 
-                INSERT *
-            """)
+                        target.status = source.status,
+                        target.modified_date = source.modified_date,
+                        target.status_desc = source.status_desc
+                WHEN NOT MATCHED THEN 
+                    INSERT *
+                """)
         logger.info(f"Batch với {len(chunk)} bản ghi đã được xử lý.")
     except Exception as e:
         logger.error(f"Lỗi trong quá trình xử lý batch: {str(e)}")
@@ -1122,7 +1122,7 @@ async def _transfer_request_cert(chunk):
             col("statusDesc").alias("status_desc"),
             col("clientId").alias("client_id"),
             col("clientName").alias("client_name"),
-            col("updatedTime").cast("timestamp").alias("modified_time"),
+            col("updatedTime").cast("timestamp").alias("modified_date"),
             col("createdDate").cast("timestamp").alias("created_date"),
             col("pricingCode").alias("pricing_code"),
             col("pricingName").alias("pricing_name"),
@@ -1263,9 +1263,9 @@ async def _transfer_credential(chunk):
             ).otherwise(col("localityCode")).alias("locality_code")
         )
         df_transformed = (df_transformed.withColumn("year_valid_from", year(col("valid_from")))
-                          .withColumn("month_valid_from", year(col("valid_from")))
+                          .withColumn("month_valid_from", month(col("valid_from")))
                           .withColumn("year_valid_to", year(col("valid_to")))
-                          .withColumn("month_valid_to", year(col("valid_to"))))
+                          .withColumn("month_valid_to", month(col("valid_to"))))
         df_transformed.createOrReplaceTempView("new_data")
         spark.sql("""
                     MERGE INTO iceberg.lakehouse.credential AS target

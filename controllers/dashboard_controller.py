@@ -86,6 +86,42 @@ def count_new_order(request: DashboardRequest):
         return ResponseModel.error(str(e))
 
 
+@router.post("/order_by_source")
+def order_by_source(request: DashboardRequest):
+    try:
+        logger.info(f"order_by_source at {datetime.now()}")
+        mess = cert_order_service.order_by_source(request.start_date, request.end_date, request.locality)
+        logger.info(f"order_by_source success at {datetime.now()} {mess}")
+        return ResponseModel.success(content=mess)
+    except Exception as e:
+        logger.error(traceback.format_exc())
+        return ResponseModel.error(str(e))
+
+
+@router.post("/order_by_account_type")
+def order_by_account_type(request: DashboardRequest):
+    try:
+        logger.info(f"order_by_account_type at {datetime.now()}")
+        mess = cert_order_service.order_by_account_type(request.start_date, request.end_date, request.locality)
+        logger.info(f"order_by_account_type success at {datetime.now()} {mess}")
+        return ResponseModel.success(content=mess)
+    except Exception as e:
+        logger.error(traceback.format_exc())
+        return ResponseModel.error(str(e))
+
+
+@router.post("/order_by_status")
+def order_by_status(request: DashboardRequest):
+    try:
+        logger.info(f"order_by_status at {datetime.now()}")
+        mess = cert_order_service.order_by_status(request.start_date, request.end_date, request.locality)
+        logger.info(f"order_by_status success at {datetime.now()} {mess}")
+        return ResponseModel.success(content=mess)
+    except Exception as e:
+        logger.error(traceback.format_exc())
+        return ResponseModel.error(str(e))
+
+
 # endregion
 
 # region cert
@@ -119,6 +155,20 @@ def count_new_credential(request: DashboardRequest):
         return ResponseModel.error(str(e))
 
 
+@router.post("/cert_by_account_type")
+def cert_by_account_type(request: DashboardRequest):
+    try:
+        logger.info(f"cert_by_account_type at {datetime.now()}")
+        mess = credential_service.cert_by_account_type(request.start_date, request.end_date, request.locality)
+        logger.info(f"cert_by_account_type success at {datetime.now()}: {mess}")
+        if mess is None:
+            mess = 0
+        return ResponseModel.success(content=mess)
+    except Exception as e:
+        logger.error(traceback.format_exc())
+        return ResponseModel.error(str(e))
+
+
 # endregion
 
 # region signature_transaction
@@ -128,7 +178,7 @@ def count_signature_transaction_by_time(request: DashboardRequest):
     try:
         logger.info(f"count_signature_transaction_by_time at {datetime.now()}")
         mess = signature_transaction_service.count_total_signature_transaction(request.start_date,
-                                                                                     request.end_date, request.by_type)
+                                                                               request.end_date, request.by_type)
         logger.info(f"count_signature_transaction_by_time success at {datetime.now()} {mess}")
         if mess is None:
             return ResponseModel.not_found()

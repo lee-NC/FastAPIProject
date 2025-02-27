@@ -26,11 +26,14 @@ class BaseRepository:
         logger.info(query)
         cursor.execute(query)
         results = cursor.fetchall()
+        column_names = [desc[0] for desc in cursor.description]
         cursor.close()
         conn.close()
         if as_dataframe:
-            df = pd.DataFrame(results, columns=columns) if columns else pd.DataFrame(results)
+            df = pd.DataFrame(results, columns=column_names)
             return df
+        cursor.close()
+        conn.close()
         return results if as_dataframe else results[0][0] if results else None
 
     def get_by_id(self, row_key: str):
